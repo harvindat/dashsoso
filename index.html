@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harvin Distribuciones · Centro de Inteligencia Directiva</title>
+<meta name="description" content="Tablero ejecutivo de ventas, margen, inventario, rotación y cobranza de Harvin Distribuciones.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f6b042'/%3E%3Ctext x='16' y='23' font-family='sans-serif' font-size='18' font-weight='800' text-anchor='middle' fill='%231a1206'%3EH%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">H</div>
+      <h1>Harvin Distribuciones<span>Inteligencia Directiva</span></h1>
+    </div>
+    <nav class="nav"></nav>
+    <div class="sidebar-foot">
+      <div class="pd">Periodo: <b>01 ene — 23 may 2026</b><br>Valuación a <b>último costo de compra</b>.<br>Fuente: 8 reportes del ERP.</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="menu-btn" aria-label="Menú">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </button>
+        <div class="crumb">
+          <span class="k">Harvin · Tablero Ejecutivo</span>
+          <h2 id="crumb-title">Resumen Ejecutivo</h2>
+        </div>
+      </div>
+      <div class="meta">
+        <span class="pill"><span class="dot"></span>Datos al 23 may 2026</span>
+      </div>
+    </header>
+
+    <div id="view" class="view"></div>
+
+    <footer class="foot">
+      <span>Harvin Distribuciones · Centro de Inteligencia Directiva</span>
+      <span>Construido sobre los reportes del ERP · Costeo a último costo de compra · MXN</span>
+    </footer>
+  </main>
+</div>
+<div class="scrim"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
