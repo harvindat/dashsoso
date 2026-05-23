@@ -285,7 +285,6 @@ VIEWS.margen = ()=>{
     <div class="card pad-lg">
       <div class="card-h"><span class="t">Artículos por banda de margen</span></div>
       <div id="c_mdist" class="chart h-md"></div>
-      ${dist['<0%']>0?`<div class="note">⚠ <b style="color:var(--red)">${dist['<0%']} artículos se vendieron por debajo del costo</b> (margen negativo). Revisar precios o costos cargados.</div>`:''}
     </div>
     <div class="card pad-lg">
       <div class="card-h"><span class="t">Margen por línea de producto</span><span class="tag teal">% margen</span></div>
@@ -304,19 +303,6 @@ VIEWS.margen = ()=>{
       <td class="num">${fMX(a.costo_unit)}</td>
       <td class="num" style="color:var(--green)">${fMX(a.margen)}</td>
       <td class="num"><span class="chip ${a.margen_pct>=25?'g':a.margen_pct>=15?'a':'r'}">${fPct(a.margen_pct)}</span></td>
-    </tr>`).join('')}
-    </tbody></table></div>
-  </div>
-
-  ${sHead('Artículos de margen crítico','Productos relevantes (venta > $500) con el menor margen porcentual — candidatos a revisión de precio.')}
-  <div class="card">
-    <div class="tbl-wrap"><table class="dt"><thead><tr><th>Artículo</th><th>Descripción</th><th class="num">Venta</th><th class="num">Utilidad</th><th class="num">Margen</th></tr></thead><tbody>
-    ${m.peor_margen_pct.slice(0,10).map(a=>`<tr>
-      <td class="t-code">${a.code}</td>
-      <td class="t-desc" title="${a.desc.replace(/"/g,'&quot;')}">${trunc(a.desc,52)}</td>
-      <td class="num">${fMX(a.venta)}</td>
-      <td class="num" style="color:${a.margen<0?'var(--red)':'var(--txt)'}">${fMX(a.margen)}</td>
-      <td class="num"><span class="chip ${a.margen_pct<0?'r':'a'}">${fPct(a.margen_pct)}</span></td>
     </tr>`).join('')}
     </tbody></table></div>
   </div>`;
