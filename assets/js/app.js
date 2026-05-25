@@ -944,6 +944,16 @@ function setActive(id){
 function disposeCharts(){
   while(charts.length){ const c=charts.pop(); try{c.dispose();}catch(e){} }
 }
+function openMenu(){
+  document.querySelector('.sidebar').classList.add('open');
+  document.querySelector('.scrim').classList.add('show');
+  document.body.classList.add('no-scroll');
+}
+function closeMenu(){
+  document.querySelector('.sidebar').classList.remove('open');
+  document.querySelector('.scrim').classList.remove('show');
+  document.body.classList.remove('no-scroll');
+}
 function render(id){
   if(!VIEWS[id]) id='resumen';
   disposeCharts();
@@ -951,12 +961,12 @@ function render(id){
   const view = document.getElementById('view');
   view.innerHTML = v.html;
   view.scrollTop = 0;
-  document.querySelector('.main').scrollTo({top:0,behavior:'instant'});
+  const main = document.querySelector('.main');
+  if(main && main.scrollTo) main.scrollTo({top:0,behavior:'auto'});
+  window.scrollTo({top:0,behavior:'auto'});
   setActive(id);
   if(v.init){ try{ v.init(); }catch(e){ console.error('init '+id, e); } }
-  // close mobile menu
-  document.querySelector('.sidebar').classList.remove('open');
-  document.querySelector('.scrim').classList.remove('show');
+  closeMenu();
 }
 function currentId(){ return (location.hash||'#resumen').replace('#',''); }
 
@@ -967,13 +977,27 @@ document.addEventListener('DOMContentLoaded', ()=>{
   buildSidebar();
   const mb = document.querySelector('.menu-btn');
   const sc = document.querySelector('.scrim');
+
+  // Navegación robusta por delegación de eventos (más confiable en móvil que
+  // depender solo de hashchange; además permite cerrar el menú al tocar el
+  // mismo elemento ya activo).
+  document.querySelector('.nav').addEventListener('click', (e)=>{
+    const a = e.target.closest('.nav-item');
+    if(!a) return;
+    e.preventDefault();
+    const id = a.dataset.id;
+    if(currentId() === id){
+      closeMenu();          // mismo destino: el hash no cambia, cerramos a mano
+    } else {
+      location.hash = id;   // dispara hashchange -> render (que cierra el menú)
+    }
+  });
+
   if(mb) mb.addEventListener('click', ()=>{
-    document.querySelector('.sidebar').classList.toggle('open');
-    sc.classList.toggle('show');
+    const open = document.querySelector('.sidebar').classList.contains('open');
+    open ? closeMenu() : openMenu();
   });
-  if(sc) sc.addEventListener('click', ()=>{
-    document.querySelector('.sidebar').classList.remove('open');
-    sc.classList.remove('show');
-  });
+  if(sc) sc.addEventListener('click', closeMenu);
+
   render(currentId());
 });
