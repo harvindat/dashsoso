@@ -114,6 +114,7 @@ body::after{
 }
 .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(61,220,151,.15)}
 .menu-btn{display:none}
+.scrim{display:none}
 
 .view{padding:30px 34px 70px;animation:fade .4s ease}
 @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
@@ -266,7 +267,7 @@ footer.foot{padding:24px 34px;border-top:1px solid var(--line-soft);color:var(--
   .g-3{grid-template-columns:repeat(2,1fr)}
 }
 @media(max-width:980px){
-  .sidebar{position:fixed;left:0;transform:translateX(-100%);transition:transform .25s ease;box-shadow:var(--shadow)}
+  .sidebar{position:fixed;left:0;top:0;height:100vh;z-index:40;transform:translateX(-100%);transition:transform .25s ease;box-shadow:var(--shadow)}
   .sidebar.open{transform:none}
   .menu-btn{display:grid;place-items:center;width:40px;height:40px;border-radius:11px;background:var(--panel);border:1px solid var(--line);color:var(--txt);cursor:pointer}
   .menu-btn svg{width:20px;height:20px}
@@ -274,8 +275,9 @@ footer.foot{padding:24px 34px;border-top:1px solid var(--line-soft);color:var(--
   .view{padding:22px 18px 60px}
   .topbar{padding:14px 18px}
   .cover{padding:26px 22px}.cover h2{font-size:26px}
-  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:18;display:none}
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:30;display:none}
   .scrim.show{display:block}
+  body.no-scroll{overflow:hidden}
 }
 @media(max-width:560px){
   .g-4,.g-3{grid-template-columns:1fr}
