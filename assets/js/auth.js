@@ -215,8 +215,9 @@
   function role(){ const s=session(); return s? s.role : null; }
   function isAdmin(){ return role()==='admin'; }
   function canUpload(){ const r=role(); return r==='admin' || r==='operador'; }
-  function canPublish(){ return role()==='admin'; }
+  function canPublish(){ const r=role(); return r==='admin' || r==='operador'; }
+  function canManageUsers(){ return role()==='admin'; }
 
-window.HAUTH = { role, isAdmin, canUpload, canPublish, login, logout, session, loadUsers, allUsers, addUser, removeUser,
+window.HAUTH = { role, isAdmin, canUpload, canPublish, canManageUsers, login, logout, session, loadUsers, allUsers, addUser, removeUser,
                    exportUsersJson, markPublished, pendingUsers, sha256, SU_USER: SU.user };
 })();

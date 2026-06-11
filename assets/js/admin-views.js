@@ -498,8 +498,8 @@ VIEWS.usuarios = ()=>{
         <div class="fld"><label>Rol</label>
           <select id="nu-role">
             <option value="viewer" selected>Consulta — solo ve los tableros</option>
-            <option value="operador">Captura — carga reportes y visualiza, sin publicar</option>
-            <option value="admin">Administrador — además publica datos y gestiona usuarios</option>
+            <option value="operador">Captura — carga y publica datos, sin gestionar usuarios</option>
+            <option value="admin">Administrador — además da de alta y gestiona usuarios</option>
           </select>
         </div>
       </div>
