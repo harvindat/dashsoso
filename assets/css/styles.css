@@ -237,16 +237,17 @@ table.dt tbody tr:last-child td{border-bottom:none}
 
 /* exec summary cover */
 .cover{
-  border-radius:var(--r);padding:34px 36px;margin-bottom:8px;position:relative;overflow:hidden;
+  border-radius:var(--r);padding:20px 26px;margin-bottom:8px;position:relative;overflow:hidden;
   background:linear-gradient(125deg,#11192b,#0d1320 70%);border:1px solid var(--line);
 }
 .cover::before{content:"";position:absolute;right:0;top:0;width:46%;height:100%;
   background:radial-gradient(600px 400px at 100% 0,rgba(246,176,66,.13),transparent 60%)}
-.cover .eyebrow{font-size:11px;letter-spacing:3px;color:var(--amber);text-transform:uppercase;font-weight:700}
-.cover h2{font-family:var(--display);font-size:34px;font-weight:800;letter-spacing:-1px;margin:12px 0 8px;line-height:1.05}
+.cover .eyebrow{font-size:10px;letter-spacing:2.5px;color:var(--amber);text-transform:uppercase;font-weight:700}
+.cover h2{font-family:var(--display);font-size:25px;font-weight:800;letter-spacing:-.6px;margin:7px 0 5px;line-height:1.08}
 .cover h2 em{font-style:normal;color:var(--amber-2)}
-.cover p{font-size:14px;color:var(--txt-2);max-width:640px;line-height:1.6}
-.cover .period{display:inline-flex;align-items:center;gap:9px;margin-top:18px;font-family:var(--mono);font-size:12px;color:var(--teal-2);background:rgba(54,214,195,.08);padding:8px 14px;border-radius:9px;border:1px solid rgba(54,214,195,.15)}
+.cover p{font-size:12.5px;color:var(--txt-2);max-width:680px;line-height:1.5;display:inline}
+.cover .period{position:absolute;top:16px;right:20px;display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11.5px;color:var(--teal-2);background:rgba(54,214,195,.08);padding:5px 11px;border-radius:8px;border:1px solid rgba(54,214,195,.15);white-space:nowrap;z-index:1}
+.cover .period svg{width:13px;height:13px;flex-shrink:0}
 
 .note{font-size:11px;color:var(--txt-3);margin-top:10px;line-height:1.5}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:8px}
@@ -274,7 +275,8 @@ footer.foot{padding:24px 34px;border-top:1px solid var(--line-soft);color:var(--
   .g-2,.g-2-1,.g-1-2,.two-col{grid-template-columns:1fr}
   .view{padding:22px 18px 60px}
   .topbar{padding:14px 18px}
-  .cover{padding:26px 22px}.cover h2{font-size:26px}
+  .cover{padding:16px 16px}.cover h2{font-size:21px}
+  .cover .period{position:static;margin-top:9px}
   .scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:30;display:none}
   .scrim.show{display:block}
   body.no-scroll{overflow:hidden}

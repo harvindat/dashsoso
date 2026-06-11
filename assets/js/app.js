@@ -143,7 +143,7 @@ VIEWS.resumen = ()=>{
     <div class="period">${svg(I.doc)} ${r.periodo}</div>
   </div>
 
-  <div class="grid g-4" style="margin-top:18px">
+  <div class="grid g-4" style="margin-top:14px">
     ${kpi({lbl:'Ventas Netas',val:fCompact(r.ventas_netas),sub:`${fNum(r.facturas)} facturas · ticket ${fMX(r.ticket_promedio)}`,ico:I.sales,cls:'feat',glow:'rgba(246,176,66,.22)'})}
     ${kpi({lbl:'Margen Bruto',val:fCompact(r.margen_bruto),sub:`<span class="chg up">${fPct(r.margen_pct)}</span> sobre ventas`,ico:I.margin,glow:'rgba(54,214,195,.18)'})}
     ${kpi({lbl:'Valor Inventario',val:fCompact(r.inventario_valor),sub:`${fNum(inv.dias_inventario)} días · ${fNum(inv.turnover_real_anual,2)}x rotación real`,ico:I.box,glow:'rgba(139,124,246,.16)'})}
