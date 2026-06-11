@@ -1,5 +1,24 @@
 {
   "version": 1,
-  "actualizado": "2026-05-25T00:00:00.000Z",
-  "users": []
+  "actualizado": "2026-06-11T23:00:45.946Z",
+  "users": [
+    {
+      "user": "dani",
+      "salt": "62e57fa61b254e3231fd2776",
+      "hash": "29a93b0f35e469256ca458d2fc73ed391d7bd9040c1b623eb476b5e487391a06",
+      "role": "operador",
+      "activo": true,
+      "creado_por": "b3t0",
+      "creado": "2026-06-11T22:55:29.177Z"
+    },
+    {
+      "user": "cindy",
+      "salt": "53ba22e8aef37b57cd9f275f",
+      "hash": "eec2c1b178805766603a904bed2208db1733b051448f39a64829384b1bcd1a6d",
+      "role": "viewer",
+      "activo": true,
+      "creado_por": "b3t0",
+      "creado": "2026-06-11T22:55:41.790Z"
+    }
+  ]
 }
