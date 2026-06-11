@@ -70,8 +70,11 @@ VIEWS.actualizar = ()=>{
   const meta = (D.meta)||{};
   const corteDefault = meta.corte || new Date().toISOString().slice(0,10);
   const repo = HGH.getRepo();
+  const canPublish = !!(window.HAUTH && HAUTH.canPublish());
   const html = `
-  ${sHead('Actualizar Datos','Carga los reportes del ERP (XLSX/CSV), consolida la información y publica el tablero actualizado al repositorio mediante tu token de GitHub.')}
+  ${sHead('Actualizar Datos', canPublish
+      ? 'Carga los reportes del ERP (XLSX/CSV), consolida la información y publica el tablero actualizado al repositorio mediante tu token de GitHub.'
+      : 'Carga los reportes del ERP (XLSX/CSV), consolida la información y visualiza el tablero actualizado. La publicación al repositorio la realiza un administrador.')}
 
   <div class="card pad-lg">
     <div class="card-h"><span class="t">1 · Parámetros del periodo</span><span class="tag amber">Obligatorio</span></div>
@@ -111,7 +114,8 @@ VIEWS.actualizar = ()=>{
   </div>
 
   <div class="card pad-lg" style="margin-top:16px">
-    <div class="card-h"><span class="t">4 · Aplicar y publicar</span><span class="tag teal">GitHub Pages</span></div>
+    <div class="card-h"><span class="t">4 · Aplicar${canPublish?' y publicar':' al tablero'}</span><span class="tag teal">${canPublish?'GitHub Pages':'Vista previa'}</span></div>
+    ${canPublish ? `
     <div class="adm-grid">
       <div class="fld"><label>Propietario (owner)</label><input id="gh-owner" value="${escA(repo.owner)}" placeholder="usuario u organización"></div>
       <div class="fld"><label>Repositorio</label><input id="gh-repo" value="${escA(repo.repo)}" placeholder="harvin-dashboard"></div>
@@ -128,6 +132,13 @@ VIEWS.actualizar = ()=>{
     </div>
     <div id="pub-msg" class="proc-msg"></div>
     <div class="note">El token se guarda solo en esta pestaña (sessionStorage) y nunca se escribe en el repositorio. La publicación actualiza <code>assets/data/harvin-data.json</code> y <code>assets/data/raw-store.json</code>; GitHub Pages refleja el cambio en 1–2 minutos y el tablero lo lee sin caché.</div>
+    ` : `
+    <div class="adm-actions" style="margin-top:4px">
+      <button class="btn btn-teal" id="btn-apply" disabled>${svg(I.check)} Aplicar al tablero (ver en esta sesión)</button>
+    </div>
+    <div id="pub-msg" class="proc-msg"></div>
+    <div class="note">Tu perfil puede cargar reportes y revisar el tablero consolidado en esta sesión, pero <b>no publica los cambios al repositorio</b>. Para dejarlos en línea de forma permanente, un administrador debe publicarlos. Si lo necesitas, puedes avisar al administrador una vez que la consolidación se vea correcta.</div>
+    `}
   </div>`;
 
   const init = ()=>{
@@ -143,10 +154,11 @@ VIEWS.actualizar = ()=>{
     $('up-modo').addEventListener('change', e=>{UPD.modo=e.target.value;});
 
     $('btn-process').addEventListener('click', processAll);
-    $('btn-validate').addEventListener('click', validateToken);
-    $('btn-apply').addEventListener('click', applyLocal);
-    $('btn-publish').addEventListener('click', publish);
-    $('btn-download').addEventListener('click', downloadJsons);
+    const bind=(id,fn)=>{ const el=$(id); if(el) el.addEventListener('click', fn); };
+    bind('btn-validate', validateToken);
+    bind('btn-apply', applyLocal);
+    bind('btn-publish', publish);
+    bind('btn-download', downloadJsons);
     renderFileList();
     refreshActionState();
   };
@@ -428,7 +440,10 @@ function applyLocal(){
   if(!UPD.result) return;
   if(window.applyHarvinData(UPD.result.data)){
     const m=document.getElementById('pub-msg');
-    if(m){ m.className='proc-msg ok'; m.textContent='✓ Tablero actualizado en esta sesión. Navega los módulos para revisarlo; recuerda Publicar para hacerlo permanente.'; }
+    const puede = !!(window.HAUTH && HAUTH.canPublish());
+    if(m){ m.className='proc-msg ok'; m.textContent = puede
+      ? '✓ Tablero actualizado en esta sesión. Navega los módulos para revisarlo; recuerda Publicar para hacerlo permanente.'
+      : '✓ Tablero actualizado en esta sesión. Navega los módulos para revisarlo. Un administrador debe publicarlo para dejarlo en línea.'; }
     location.hash = 'actualizar';
   }
 }
@@ -483,7 +498,8 @@ VIEWS.usuarios = ()=>{
         <div class="fld"><label>Rol</label>
           <select id="nu-role">
             <option value="viewer" selected>Consulta — solo ve los tableros</option>
-            <option value="admin">Administrador — además carga datos y gestiona usuarios</option>
+            <option value="operador">Captura — carga reportes y visualiza, sin publicar</option>
+            <option value="admin">Administrador — además publica datos y gestiona usuarios</option>
           </select>
         </div>
       </div>
@@ -520,7 +536,7 @@ VIEWS.usuarios = ()=>{
       ].concat(HAUTH.allUsers().map(u=>`
         <tr>
           <td>${escA(u.user)}</td>
-          <td><span class="tag ${u.role==='admin'?'amber':'teal'}">${u.role==='admin'?'admin':'consulta'}</span></td>
+          <td><span class="tag ${u.role==='admin'?'amber':(u.role==='operador'?'violet':'teal')}">${u.role==='admin'?'admin':(u.role==='operador'?'captura':'consulta')}</span></td>
           <td>${u.activo===false?'<span class="tag red">baja pendiente</span>':(u.origen==='borrador'?'<span class="tag violet">borrador</span>':'<span class="tag green">activo</span>')}</td>
           <td>${escA(u.creado_por||'—')}</td>
           <td>${u.activo!==false?`<button class="btn btn-xs" data-del="${escA(u.user)}">Eliminar</button>`:''}</td>

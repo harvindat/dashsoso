@@ -107,8 +107,8 @@ const NAV = [
   {id:'compras', name:'Sugerencias de Compra', ico:I.cart},
   {id:'promociones', name:'Promociones & Liquidación', ico:I.tag},
   {id:'cobranza', name:'Cobranza & Cartera', ico:I.cash},
-  {sec:'Administración', admin:true},
-  {id:'actualizar', name:'Actualizar Datos', ico:I.upload, admin:true},
+  {sec:'Administración', upload:true},
+  {id:'actualizar', name:'Actualizar Datos', ico:I.upload, upload:true},
   {id:'usuarios', name:'Usuarios', ico:I.users, admin:true},
 ];
 
@@ -953,8 +953,10 @@ VIEWS.cobranza = ()=>{
    ============================================================ */
 function buildSidebar(){
   const sess = (window.HAUTH && HAUTH.session()) || null;
-  const isAdmin = sess && sess.role==='admin';
-  const nav = NAV.filter(n=>!n.admin || isAdmin).map(n=>{
+  const isAdmin = !!(window.HAUTH && HAUTH.isAdmin());
+  const canUpload = !!(window.HAUTH && HAUTH.canUpload());
+  const allow = n => (!n.admin || isAdmin) && (!n.upload || canUpload);
+  const nav = NAV.filter(allow).map(n=>{
     if(n.sec) return `<div class="nav-sec">${n.sec}</div>`;
     return `<a class="nav-item" href="#${n.id}" data-id="${n.id}"><span class="ico">${svg(n.ico)}</span><span>${n.name}</span></a>`;
   }).join('');
@@ -977,7 +979,10 @@ function updateMetaUI(){
   const sess = (window.HAUTH && HAUTH.session()) || null;
   if(uc){
     uc.style.display = sess ? 'inline-flex' : 'none';
-    if(sess) uc.querySelector('.u-name').textContent = sess.user + (sess.role==='admin'?' · admin':'');
+    if(sess){
+      const tag = sess.role==='admin' ? ' · admin' : (sess.role==='operador' ? ' · captura' : '');
+      uc.querySelector('.u-name').textContent = sess.user + tag;
+    }
   }
 }
 function setActive(id){
@@ -1002,8 +1007,10 @@ function closeMenu(){
 function render(id){
   if(!VIEWS[id]) id='resumen';
   const navItem = NAV.find(n=>n.id===id);
-  const sess = (window.HAUTH && HAUTH.session()) || null;
-  if(navItem && navItem.admin && (!sess || sess.role!=='admin')) id='resumen';
+  const isAdmin = !!(window.HAUTH && HAUTH.isAdmin());
+  const canUpload = !!(window.HAUTH && HAUTH.canUpload());
+  if(navItem && navItem.admin && !isAdmin) id='resumen';
+  if(navItem && navItem.upload && !canUpload) id='resumen';
   disposeCharts();
   const v = VIEWS[id]();
   const view = document.getElementById('view');

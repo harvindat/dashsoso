@@ -169,7 +169,8 @@
     const salt = randomSalt();
     const hash = await sha256(salt + '|' + user + '|' + pass);
     const draft = readDraft().filter(u=>u.user.toLowerCase()!==user.toLowerCase());
-    draft.push({user, salt, hash, role: role==='admin'?'admin':'viewer', activo:true,
+    const rol = role==='admin' ? 'admin' : (role==='operador' ? 'operador' : 'viewer');
+    draft.push({user, salt, hash, role: rol, activo:true,
                 creado_por: s.user, creado: new Date().toISOString()});
     writeDraft(draft);
     return {ok:true};
@@ -207,6 +208,15 @@
   }
   function pendingUsers(){ return readDraft().length; }
 
-  window.HAUTH = { login, logout, session, loadUsers, allUsers, addUser, removeUser,
+    /* ---------- permisos por rol ----------
+     admin    → todo (carga, publica, gestiona usuarios)
+     operador → carga reportes y visualiza, pero NO publica ni gestiona usuarios
+     viewer   → solo consulta de tableros                                        */
+  function role(){ const s=session(); return s? s.role : null; }
+  function isAdmin(){ return role()==='admin'; }
+  function canUpload(){ const r=role(); return r==='admin' || r==='operador'; }
+  function canPublish(){ return role()==='admin'; }
+
+window.HAUTH = { role, isAdmin, canUpload, canPublish, login, logout, session, loadUsers, allUsers, addUser, removeUser,
                    exportUsersJson, markPublished, pendingUsers, sha256, SU_USER: SU.user };
 })();
