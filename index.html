@@ -20,7 +20,7 @@
     </div>
     <nav class="nav"></nav>
     <div class="sidebar-foot">
-      <div class="pd">Periodo: <b>01 ene — 23 may 2026</b><br>Valuación a <b>último costo de compra</b>.<br>Fuente: 8 reportes del ERP.</div>
+      <div class="pd" id="sidebar-periodo">Periodo: <b>01 ene — 23 may 2026</b><br>Valuación a <b>último costo de compra</b>.<br>Fuente: 8 reportes del ERP.</div>
     </div>
   </aside>
 
@@ -36,7 +36,13 @@
         </div>
       </div>
       <div class="meta">
-        <span class="pill"><span class="dot"></span>Datos al 23 may 2026</span>
+        <span class="pill" id="pill-update"><span class="dot"></span>Datos al 23 may 2026</span>
+        <span id="user-chip" style="display:none">
+          <span class="u-name"></span>
+          <button id="btn-logout" title="Cerrar sesión" aria-label="Cerrar sesión">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+          </button>
+        </span>
       </div>
     </header>
 
@@ -51,7 +57,13 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="assets/js/data.js"></script>
+<script src="assets/js/loader.js"></script>
+<script src="assets/js/auth.js"></script>
+<script src="assets/js/github.js"></script>
+<script src="assets/js/ingest.js"></script>
 <script src="assets/js/app.js"></script>
+<script src="assets/js/admin-views.js"></script>
 </body>
 </html>

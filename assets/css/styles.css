@@ -283,3 +283,134 @@ footer.foot{padding:24px 34px;border-top:1px solid var(--line-soft);color:var(--
   .g-4,.g-3{grid-template-columns:1fr}
   .strip .s{min-width:50%}
 }
+
+/* ============================================================
+   ADMINISTRACIÓN — login, carga de reportes, usuarios
+   ============================================================ */
+
+/* ---- Login gate ---- */
+#login-gate{
+  position:fixed;inset:0;z-index:100;display:grid;place-items:center;
+  background:
+    radial-gradient(900px 500px at 15% -10%, rgba(246,176,66,.07), transparent 60%),
+    radial-gradient(800px 500px at 110% 110%, rgba(54,214,195,.06), transparent 60%),
+    var(--bg);
+  transition:opacity .35s ease, visibility .35s;
+}
+#login-gate.bye{opacity:0;visibility:hidden}
+.login-card{
+  width:min(400px, calc(100vw - 36px));
+  background:linear-gradient(180deg, var(--panel-2), var(--panel));
+  border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow);padding:34px 30px 26px;
+  display:flex;flex-direction:column;gap:14px;
+}
+.login-logo{
+  width:46px;height:46px;border-radius:13px;display:grid;place-items:center;
+  background:linear-gradient(135deg, rgba(246,176,66,.2), rgba(246,176,66,.05));
+  border:1px solid rgba(246,176,66,.32);color:var(--amber-2);
+  font-family:var(--display);font-weight:800;font-size:20px;
+}
+.login-card h2{font-family:var(--display);font-size:19px;font-weight:800;letter-spacing:-.4px;margin-top:-2px}
+.login-sub{font-size:12.5px;color:var(--txt-2);line-height:1.55;margin-top:-8px}
+.login-card form{display:flex;flex-direction:column;gap:7px;margin-top:6px}
+.login-card form label{font-size:10.5px;font-family:var(--mono);letter-spacing:.5px;text-transform:uppercase;color:var(--txt-3);margin-top:6px}
+.login-card form input{
+  background:var(--bg-2);border:1px solid var(--line);border-radius:10px;
+  color:var(--txt);font-family:var(--body);font-size:13.5px;padding:11px 13px;
+  outline:none;transition:border-color .15s, box-shadow .15s;
+}
+.login-card form input:focus{border-color:rgba(246,176,66,.55);box-shadow:0 0 0 3px rgba(246,176,66,.12)}
+.login-card form .btn{margin-top:12px;width:100%}
+.login-msg{display:none;font-size:12px;line-height:1.5;border-radius:10px;padding:9px 12px;margin-top:4px;
+  color:var(--rose);background:rgba(251,111,132,.08);border:1px solid rgba(251,111,132,.25)}
+.login-msg:not(:empty){display:block}
+.login-foot{font-size:10.5px;color:var(--txt-3);text-align:center;margin-top:4px;font-family:var(--mono)}
+
+/* ---- Campos de formulario ---- */
+.fld{display:flex;flex-direction:column;gap:6px;min-width:0}
+.fld label{font-size:10.5px;font-family:var(--mono);letter-spacing:.5px;text-transform:uppercase;color:var(--txt-3)}
+.fld input,.fld select{
+  background:var(--bg-2);border:1px solid var(--line);border-radius:10px;
+  color:var(--txt);font-family:var(--body);font-size:13px;padding:10px 12px;
+  outline:none;transition:border-color .15s, box-shadow .15s;width:100%;
+}
+.fld input:focus,.fld select:focus{border-color:rgba(246,176,66,.55);box-shadow:0 0 0 3px rgba(246,176,66,.12)}
+.fld select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--txt-3) 50%),linear-gradient(135deg,var(--txt-3) 50%,transparent 50%);background-position:calc(100% - 17px) 50%,calc(100% - 12px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:30px}
+.fld.sm input,.fld.sm select{padding:7px 10px;font-size:12px;border-radius:8px}
+.fld.missing input,.fld.missing select{border-color:rgba(251,111,132,.6)}
+.fld.missing label{color:var(--rose)}
+
+/* ---- Botones ---- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  border:1px solid var(--line);border-radius:11px;cursor:pointer;
+  background:var(--panel-3);color:var(--txt);font-family:var(--body);
+  font-weight:700;font-size:13px;padding:10px 18px;
+  transition:transform .12s, box-shadow .15s, background .15s, opacity .15s;
+}
+.btn:hover{transform:translateY(-1px)}
+.btn:active{transform:none}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.btn svg{width:15px;height:15px}
+.btn-amber{background:linear-gradient(135deg,#f6b042,#e89a1f);border-color:rgba(246,176,66,.5);color:#1a1206}
+.btn-amber:hover{box-shadow:0 8px 24px -8px rgba(246,176,66,.55)}
+.btn-teal{background:linear-gradient(135deg,#36d6c3,#1eb3a1);border-color:rgba(54,214,195,.5);color:#06201c}
+.btn-teal:hover{box-shadow:0 8px 24px -8px rgba(54,214,195,.5)}
+.btn-xs{padding:5px 11px;font-size:11px;border-radius:8px;font-weight:600}
+
+/* ---- Dropzone ---- */
+.dropzone{
+  border:2px dashed var(--line);border-radius:var(--r);
+  background:rgba(255,255,255,.012);
+  padding:38px 22px;text-align:center;cursor:pointer;
+  transition:border-color .2s, background .2s;
+}
+.dropzone:hover,.dropzone.over{border-color:rgba(246,176,66,.55);background:rgba(246,176,66,.04)}
+.dropzone .dz-ico{width:44px;height:44px;margin:0 auto 12px;border-radius:13px;display:grid;place-items:center;background:rgba(246,176,66,.1);border:1px solid rgba(246,176,66,.25);color:var(--amber-2)}
+.dropzone .dz-ico svg{width:21px;height:21px}
+.dropzone p{font-size:13.5px;color:var(--txt-2)}
+.dropzone .dz-link{color:var(--amber-2);font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.dropzone .dz-sub{font-size:11px;color:var(--txt-3);margin-top:7px;font-family:var(--mono)}
+
+/* ---- Tarjetas de archivo ---- */
+.file-list{display:flex;flex-direction:column;gap:12px;margin-top:14px}
+.empty-files{font-size:12.5px;color:var(--txt-3);text-align:center;padding:10px 0}
+.file-card{
+  background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:14px 16px;display:flex;flex-direction:column;gap:11px;
+}
+.file-card.err{border-color:rgba(251,111,132,.45)}
+.fc-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.fc-name{font-weight:700;font-size:13px;word-break:break-all}
+.fc-meta{font-family:var(--mono);font-size:10.5px;color:var(--txt-3)}
+.fc-head .spacer{flex:1}
+.fc-row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.fc-row .fld{flex:1;min-width:150px}
+.map-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;padding-top:4px;border-top:1px dashed var(--line-soft)}
+
+/* ---- Layout admin ---- */
+.adm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.adm-grid.one{grid-template-columns:1fr}
+.adm-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.proc-msg{font-size:12.5px;line-height:1.5;border-radius:10px;padding:9px 13px;border:1px solid var(--line);background:var(--bg-2);color:var(--txt-2);display:none;max-width:100%}
+.proc-msg:not(:empty){display:inline-block}
+.proc-msg.ok{color:var(--green);background:rgba(61,220,151,.07);border-color:rgba(61,220,151,.25)}
+.proc-msg.bad{color:var(--rose);background:rgba(251,111,132,.07);border-color:rgba(251,111,132,.25)}
+.prev-meta{font-family:var(--mono);font-size:11px;color:var(--txt-3);margin-top:8px}
+.up{color:var(--green);font-family:var(--mono)}
+.dn{color:var(--rose);font-family:var(--mono)}
+.u-pub-desc{font-size:12px;color:var(--txt-2);line-height:1.55;margin-bottom:12px}
+
+/* ---- Chip de usuario en topbar ---- */
+#user-chip{display:inline-flex;align-items:center;gap:9px;background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:5px 6px 5px 13px}
+#user-chip .u-name{font-family:var(--mono);font-size:11.5px;color:var(--txt-2)}
+#user-chip .u-name b{color:var(--amber-2)}
+#btn-logout{display:grid;place-items:center;width:26px;height:26px;border-radius:999px;border:1px solid var(--line);background:var(--panel-3);color:var(--txt-3);cursor:pointer;transition:color .15s,border-color .15s}
+#btn-logout:hover{color:var(--rose);border-color:rgba(251,111,132,.4)}
+#btn-logout svg{width:13px;height:13px}
+
+@media(max-width:560px){
+  .login-card{padding:26px 20px 20px}
+  .adm-grid{grid-template-columns:1fr 1fr}
+}

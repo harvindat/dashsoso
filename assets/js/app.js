@@ -1,19 +1,31 @@
 /* ============================================================
    HARVIN DISTRIBUCIONES — App de Inteligencia Directiva
    ============================================================ */
-const D = window.HARVIN;
+let D = window.HARVIN || {};
+
+/* Permite refrescar el tablero en vivo cuando se integran nuevos reportes
+   (lo invoca la vista "Actualizar Datos" y el cargador tras publicar). */
+window.applyHarvinData = function(newData){
+  if(!newData || !newData.resumen){ console.warn('applyHarvinData: datos inválidos'); return false; }
+  D = newData;
+  window.HARVIN = newData;
+  try{ updateMetaUI(); }catch(e){}
+  try{ render(currentId()); }catch(e){ console.error(e); }
+  return true;
+};
 
 /* ---------- Formateadores ---------- */
-const fMX = (n,dec=0)=> n==null?'—':'$'+Number(n).toLocaleString('es-MX',{minimumFractionDigits:dec,maximumFractionDigits:dec});
+const _bad = n => n==null || (typeof n==='number' && !isFinite(n));
+const fMX = (n,dec=0)=> _bad(n)?'—':'$'+Number(n).toLocaleString('es-MX',{minimumFractionDigits:dec,maximumFractionDigits:dec});
 const fCompact = (n)=>{
-  if(n==null) return '—';
+  if(_bad(n)) return '—';
   const a=Math.abs(n);
   if(a>=1e6) return '$'+(n/1e6).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2})+'M';
   if(a>=1e3) return '$'+(n/1e3).toLocaleString('es-MX',{minimumFractionDigits:1,maximumFractionDigits:1})+'K';
   return '$'+Math.round(n).toLocaleString('es-MX');
 };
-const fNum = (n,dec=0)=> n==null?'—':Number(n).toLocaleString('es-MX',{minimumFractionDigits:dec,maximumFractionDigits:dec});
-const fPct = (n,dec=1)=> n==null?'—':Number(n).toLocaleString('es-MX',{minimumFractionDigits:dec,maximumFractionDigits:dec})+'%';
+const fNum = (n,dec=0)=> _bad(n)?'—':Number(n).toLocaleString('es-MX',{minimumFractionDigits:dec,maximumFractionDigits:dec});
+const fPct = (n,dec=1)=> _bad(n)?'—':Number(n).toLocaleString('es-MX',{minimumFractionDigits:dec,maximumFractionDigits:dec})+'%';
 const trunc = (s,n=46)=> !s?'':(s.length>n?s.slice(0,n)+'…':s);
 
 /* ---------- Paleta de gráficas ---------- */
@@ -27,7 +39,11 @@ const SERIES = [C.amber,C.teal,C.violet,C.green,C.blue,C.rose,C.amber2,C.teal2];
 /* ---------- ECharts theme base ---------- */
 const charts = [];
 function mk(el, opt){
-  const c = echarts.init(document.getElementById(el),null,{renderer:'canvas'});
+  const dom = document.getElementById(el);
+  if(!dom){ console.warn('mk: contenedor no encontrado:', el); return null; }
+  const prev = echarts.getInstanceByDom(dom);
+  if(prev){ try{ prev.dispose(); }catch(e){} }
+  const c = echarts.init(dom, null, {renderer:'canvas'});
   opt.textStyle = {fontFamily:'Manrope', color:C.txt};
   opt.grid = Object.assign({left:8,right:18,top:24,bottom:8,containLabel:true}, opt.grid||{});
   if(opt.tooltip!==null) opt.tooltip = Object.assign({
@@ -64,7 +80,11 @@ const I = {
   pkg:'<path d="M16.5 9.4L7.5 4.2M21 16V8a2 2 0 00-1-1.7l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.7l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/>',
   doc:'<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6M9 13h6M9 17h6"/>',
   spark:'<path d="M12 2v6M12 16v6M2 12h6M16 12h6M5 5l3 3M16 16l3 3M19 5l-3 3M8 16l-3 3"/>',
-  check:'<path d="M20 6L9 17l-5-5"/>'
+  check:'<path d="M20 6L9 17l-5-5"/>',
+  upload:'<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+  key:'<path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.78 7.78 5.5 5.5 0 017.78-7.78zm0 0L15.5 7.5m3 3L21 8m-3-3l3 3"/>',
+  out:'<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>',
+  shield:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'
 };
 const svg = (p)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 
@@ -87,6 +107,9 @@ const NAV = [
   {id:'compras', name:'Sugerencias de Compra', ico:I.cart},
   {id:'promociones', name:'Promociones & Liquidación', ico:I.tag},
   {id:'cobranza', name:'Cobranza & Cartera', ico:I.cash},
+  {sec:'Administración', admin:true},
+  {id:'actualizar', name:'Actualizar Datos', ico:I.upload, admin:true},
+  {id:'usuarios', name:'Usuarios', ico:I.users, admin:true},
 ];
 
 /* ---------- KPI helper ---------- */
@@ -929,11 +952,33 @@ VIEWS.cobranza = ()=>{
    ROUTER & BOOTSTRAP
    ============================================================ */
 function buildSidebar(){
-  const nav = NAV.map(n=>{
+  const sess = (window.HAUTH && HAUTH.session()) || null;
+  const isAdmin = sess && sess.role==='admin';
+  const nav = NAV.filter(n=>!n.admin || isAdmin).map(n=>{
     if(n.sec) return `<div class="nav-sec">${n.sec}</div>`;
     return `<a class="nav-item" href="#${n.id}" data-id="${n.id}"><span class="ico">${svg(n.ico)}</span><span>${n.name}</span></a>`;
   }).join('');
   document.querySelector('.nav').innerHTML = nav;
+}
+/* Sincroniza periodo / fecha de corte / usuario en la interfaz */
+function updateMetaUI(){
+  const meta = D.meta || {};
+  const periodo = (D.resumen && D.resumen.periodo) || meta.periodo || '';
+  const pd = document.getElementById('sidebar-periodo');
+  if(pd && periodo) pd.innerHTML = `Periodo: <b>${periodo.replace(/\s*\(.*\)$/,'')}</b><br>Valuación a <b>último costo de compra</b>.<br>Fuente: 8 reportes del ERP.`;
+  const pill = document.getElementById('pill-update');
+  if(pill){
+    let txt = 'Datos actualizados';
+    if(meta.actualizado){ const d=new Date(meta.actualizado); if(!isNaN(d)) txt='Datos al '+d.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'}); }
+    else if(periodo){ const m=periodo.match(/—\s*(.+?)\s*\(/); if(m) txt='Datos al '+m[1]; }
+    pill.innerHTML = '<span class="dot"></span>'+txt;
+  }
+  const uc = document.getElementById('user-chip');
+  const sess = (window.HAUTH && HAUTH.session()) || null;
+  if(uc){
+    uc.style.display = sess ? 'inline-flex' : 'none';
+    if(sess) uc.querySelector('.u-name').textContent = sess.user + (sess.role==='admin'?' · admin':'');
+  }
 }
 function setActive(id){
   document.querySelectorAll('.nav-item').forEach(a=>a.classList.toggle('active', a.dataset.id===id));
@@ -956,6 +1001,9 @@ function closeMenu(){
 }
 function render(id){
   if(!VIEWS[id]) id='resumen';
+  const navItem = NAV.find(n=>n.id===id);
+  const sess = (window.HAUTH && HAUTH.session()) || null;
+  if(navItem && navItem.admin && (!sess || sess.role!=='admin')) id='resumen';
   disposeCharts();
   const v = VIEWS[id]();
   const view = document.getElementById('view');
@@ -973,8 +1021,23 @@ function currentId(){ return (location.hash||'#resumen').replace('#',''); }
 window.addEventListener('hashchange', ()=>render(currentId()));
 window.addEventListener('resize', ()=>{ charts.forEach(c=>{try{c.resize();}catch(e){}}); });
 
-document.addEventListener('DOMContentLoaded', ()=>{
+document.addEventListener('DOMContentLoaded', async ()=>{
+  try{ await (window.HARVIN_READY || Promise.resolve()); }catch(e){}
+  D = window.HARVIN || D;
+  if(window.HAUTH){
+    try{ await HAUTH.loadUsers(); }catch(e){}
+    if(!HAUTH.session()){
+      if(typeof showLoginGate==='function'){ showLoginGate(()=>bootApp()); return; }
+    }
+  }
+  bootApp();
+});
+
+function bootApp(){
   buildSidebar();
+  updateMetaUI();
+  const lo = document.getElementById('btn-logout');
+  if(lo) lo.onclick = ()=>{ if(confirm('¿Cerrar sesión?')) HAUTH.logout(); };
   const mb = document.querySelector('.menu-btn');
   const sc = document.querySelector('.scrim');
 
@@ -1000,4 +1063,4 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(sc) sc.addEventListener('click', closeMenu);
 
   render(currentId());
-});
+}
