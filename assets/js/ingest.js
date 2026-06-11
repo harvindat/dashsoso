@@ -64,7 +64,7 @@
     code:    ['articulo','art','clave','codigo','cve','sku','no. parte','numero de parte','clave articulo','cve. articulo','clave del articulo'],
     desc:    ['descripcion','nombre','desc','nombre del articulo','articulo descripcion','concepto'],
     units:   ['unidades','cantidad','piezas','pzas','cant','uds','unidades vendidas','cantidad vendida'],
-    amount:  ['importe','venta','ventas','neto','importe neto','total','monto','venta neta','importe venta','subtotal'],
+    amount:  ['importe','venta','ventas','importe neto','monto','venta neta','importe venta','subtotal','neto'],
     stock:   ['existencia','exist','inventario','stock','existencias','exist.'],
     cost:    ['costo','costo unitario','ultimo costo','costo u','cu','costo unit','ult. costo','ultimo costo de compra'],
     value:   ['valor','valor inventario','importe inventario','valor total','valuacion','costo total'],
@@ -72,11 +72,15 @@
     clientCode:['clave cliente','cve cliente','codigo cliente','no. cliente','cliente clave','num. cliente'],
     balance: ['saldo','saldo pendiente','por cobrar','adeudo','saldo actual'],
     days:    ['dias','antiguedad','dias vencido','atraso','dias de atraso','dias transcurridos','edad'],
-    invoices:['facturas','documentos','docs','no. facturas','folios','num facturas'],
+    invoices:['facturas','documentos','docs','no. facturas','num facturas'],
     outflow: ['salidas','salida','unidades salida','salidas del periodo'],
-    avgInv:  ['inventario promedio','inv promedio','inv. promedio','promedio','existencia promedio'],
+    avgInv:  ['inventario promedio','inv promedio','inv. promedio','existencia promedio','promedio'],
     turnover:['rotacion','indice de rotacion','rotacion del periodo'],
-    lastSale:['ultima venta','fecha ultima venta','ult venta','ult. venta','fecha de ultima venta']
+    lastSale:['ultima venta','fecha ultima venta','ult venta','ult. venta','fecha de ultima venta'],
+    folio:   ['folio','factura','no. factura','documento','no. documento'],
+    tax:     ['impuesto','iva','impuestos'],
+    total:   ['total','importe total','gran total'],
+    fecha:   ['fecha','fecha factura','fecha documento']
   };
 
   const REPORT_TYPES = {
@@ -86,8 +90,15 @@
     EXIVAL:    { nombre:'Existencia y valor (EXIVAL)',  req:['code','desc','stock','cost'],   opt:['value'] },
     INACTIVOS: { nombre:'Artículos inactivos',          req:['code','lastSale'],              opt:['desc','stock','value'] },
     ROTACION:  { nombre:'Rotación de inventario',       req:['desc','outflow','avgInv'],      opt:['turnover','code'] },
-    COBRANZA:  { nombre:'Cobranza / Cartera',           req:['client','balance'],             opt:['days','invoices'] }
+    COBRANZA:  { nombre:'Cobranza / Cartera',           req:['client','balance'],             opt:['days','invoices'] },
+    DRVETS:    { nombre:'Diario de ventas (facturas)',  req:['folio','amount'],               opt:['client','tax','total','fecha'] }
   };
+
+  /* Reportes del ERP que NO alimentan el tablero (se reconocen para avisar) */
+  const IGNORED_TITLES = [
+    {re:/diarios? de compras/, nombre:'Diario de compras'},
+    {re:/^cobros?$|cobros realizados/, nombre:'Cobros realizados'}
+  ];
 
   /* ================= lectura de archivos ================= */
   async function parseFile(file){
@@ -146,6 +157,138 @@
     return map;
   }
 
+  /* ---------- detección del periodo en los títulos del reporte ----------
+     Reconoce: "Del 1 de enero al 23 de mayo del 2026", "Al 23 de mayo del 2026",
+               "01/ene./2026 al 23/may./2026", "Periodo del 01/ene./2026 al ..." */
+  const MESES_ES = {enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,septiembre:9,setiembre:9,octubre:10,noviembre:11,diciembre:12,
+                    ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12};
+  function _iso(d,m,y){ m=MESES_ES[strip(m)]; if(!m||!d||!y) return null;
+    return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; }
+  function detectPeriod(aoa){
+    const lim = Math.min(aoa.length, 10);
+    for(let i=0;i<lim;i++){
+      const txt = (aoa[i]||[]).filter(c=>typeof c==='string').join(' ');
+      if(!txt) continue;
+      let m = txt.match(/del?\s+(\d{1,2})\s+de\s+([a-záé]+)(?:\s+del?\s+(\d{4}))?\s+al\s+(\d{1,2})\s+de\s+([a-záé]+)\s+del?\s+(\d{4})/i);
+      if(m) return {inicio:_iso(+m[1],m[2],+(m[3]||m[6])), corte:_iso(+m[4],m[5],+m[6])};
+      m = txt.match(/(\d{1,2})\/([a-z]{3})\.?\/(\d{4})\s+al\s+(\d{1,2})\/([a-z]{3})\.?\/(\d{4})/i);
+      if(m) return {inicio:_iso(+m[1],m[2],+m[3]), corte:_iso(+m[4],m[5],+m[6])};
+      m = txt.match(/\bal?\s+(\d{1,2})\s+de\s+([a-záé]+)\s+del?\s+(\d{4})/i);
+      if(m) return {inicio:null, corte:_iso(+m[1],m[2],+m[3])};
+    }
+    return null;
+  }
+
+  /* ---------- inferencia de columnas por CONTENIDO (celdas combinadas del ERP) ----------
+     Muchos reportes traen la descripción o el importe en columnas SIN encabezado
+     propio. Se analizan hasta 60 filas de datos para deducirlas. */
+  function inferColumnsByContent(aoa, headerIdx, map, type){
+    const sample = [];
+    for(let i=headerIdx+1;i<aoa.length && sample.length<60;i++){
+      const row=aoa[i]||[];
+      if(!row.some(c=>c!=null && c!=='')) continue;
+      const ft = row.find(c=>typeof c==='string' && c.trim());
+      if(ft && /^total\b/i.test(ft.trim())) continue;
+      sample.push(row);
+    }
+    if(!sample.length) return map;
+    const nCols = Math.max(...sample.map(r=>r.length));
+    const used = new Set(Object.values(map).filter(v=>v!=null));
+    const stats = [];
+    for(let c=0;c<nCols;c++){
+      let txtLong=0, nums=0, filled=0, maxAbs=0, ints=0;
+      sample.forEach(r=>{
+        const v=r[c];
+        if(v==null||v==='') return;
+        filled++;
+        if(typeof v==='number'){ nums++; maxAbs=Math.max(maxAbs,Math.abs(v)); if(Number.isInteger(v)) ints++; }
+        else if(typeof v==='string' && v.trim().length>=12 && !/^\d+[\d.,-]*$/.test(v.trim())) txtLong++;
+      });
+      stats.push({c, txtLong, nums, filled, maxAbs, ints});
+    }
+    const free = s => !used.has(s.c);
+    // cliente: si la columna mapeada trae claves (números/códigos cortos), el NOMBRE
+    // real vive en otra columna de texto largo sin encabezado (celdas combinadas)
+    if(map.client!=null && ['VENTAS_CLI','CLI_ART','COBRANZA'].includes(type)){
+      let shortCodes=0, checked=0;
+      sample.forEach(r=>{
+        const v=r[map.client];
+        if(v==null||v==='') return;
+        checked++;
+        const s=String(v).trim();
+        if(/^\d{1,8}$/.test(s) || (typeof v==='number')) shortCodes++;
+      });
+      if(checked && shortCodes/checked>0.7){
+        const cand = stats.filter(s=>free(s) && s.txtLong>=sample.length*0.5)
+                          .sort((a,b)=>b.txtLong-a.txtLong)[0];
+        if(cand){
+          if(map.clientCode==null) map.clientCode = map.client;
+          map.client = cand.c; used.add(cand.c);
+        }
+      }
+    }
+    // descripción: columna de texto largo más poblada (excluyendo code/client ya mapeados)
+    if(map.desc==null && ('desc' in map || ['VENTAS_ART','EXIVAL','INACTIVOS','ROTACION','CLI_ART'].includes(type))){
+      const cand = stats.filter(s=>free(s) && s.txtLong>=sample.length*0.5)
+                        .sort((a,b)=>b.txtLong-a.txtLong)[0];
+      if(cand){ map.desc=cand.c; used.add(cand.c); }
+    }
+    // importe: columna numérica con valores más grandes, la más a la derecha en empate
+    if(map.amount==null && ['VENTAS_ART','VENTAS_CLI','CLI_ART'].includes(type)){
+      const cand = stats.filter(s=>free(s) && s.nums>=sample.length*0.5)
+                        .sort((a,b)=>(b.maxAbs-a.maxAbs)||(b.c-a.c))[0];
+      if(cand){ map.amount=cand.c; used.add(cand.c); }
+    }
+    // unidades: columna numérica entera restante
+    if(map.units==null && ['VENTAS_ART','CLI_ART'].includes(type)){
+      const cand = stats.filter(s=>free(s) && s.nums>=sample.length*0.5 && s.ints===s.nums)
+                        .sort((a,b)=>b.nums-a.nums)[0];
+      if(cand){ map.units=cand.c; used.add(cand.c); }
+    }
+    return map;
+  }
+
+  /* ---------- detección de formatos AGRUPADOS del ERP ---------- */
+  /* Cliente×Artículo agrupado: bloques  [cveCliente,…,NOMBRE] → header "Artículo … Venta/Unidades" → artículos */
+  function isGroupedCliArt(aoa){
+    let hdrArt=0;
+    const lim=Math.min(aoa.length,400);
+    for(let i=0;i<lim;i++){
+      const c0=strip((aoa[i]||[])[0]);
+      if(c0==='articulo') hdrArt++;
+      if(hdrArt>=2) return true;     // el header "Artículo" se repite por cliente
+    }
+    return false;
+  }
+  /* Cobranza agrupada: bloques cliente → sub-tabla Concepto/Folio/…/Atraso/Saldo */
+  function isGroupedCobranza(aoa){
+    const lim=Math.min(aoa.length,80);
+    for(let i=0;i<lim;i++){
+      const keys=(aoa[i]||[]).map(strip);
+      if(keys.includes('concepto') && keys.includes('folio') && keys.includes('saldo')) return true;
+    }
+    return false;
+  }
+
+  /* Detecta el tipo por el TÍTULO del reporte (primeras filas) — lo más confiable
+     en los reportes reales del ERP — con la heurística por columnas como respaldo. */
+  function detectByTitle(aoa){
+    const lim = Math.min(aoa.length, 8);
+    let txt='';
+    for(let i=0;i<lim;i++) txt += ' ' + (aoa[i]||[]).filter(c=>typeof c==='string').map(strip).join(' ');
+    for(const ig of IGNORED_TITLES) if(ig.re.test(txt)) return {ignored:ig.nombre};
+    // Reporte de cobros realizados: encabezados "Forma de cobro"/"Cobrador" lo delatan
+    if(/forma de cobro|cobrador/.test(txt)) return {ignored:'Cobros realizados'};
+    if(/diarios? de ventas/.test(txt)) return {type:'DRVETS'};
+    if(/ventas por articulo/.test(txt)) return {type:'VENTAS_ART'};
+    if(/ventas por cliente/.test(txt)) return {type: isGroupedCliArt(aoa) ? 'CLI_ART' : 'VENTAS_CLI', grouped:isGroupedCliArt(aoa)};
+    if(/existencia y valor/.test(txt)) return {type:'EXIVAL'};
+    if(/articulos inactivos/.test(txt)) return {type:'INACTIVOS'};
+    if(/rotacion del inventario|rotacion de inventario/.test(txt)) return {type:'ROTACION'};
+    if(/cobranza|cartera de clientes/.test(txt)) return {type:'COBRANZA', grouped:isGroupedCobranza(aoa)};
+    return null;
+  }
+
   /* Detecta el tipo de reporte por columnas + nombre de archivo */
   function detectType(headers, filename){
     const map = autoMapColumns(headers);
@@ -175,15 +318,160 @@
     return {type:bestT, map, scores};
   }
 
+  /* Ajustes de mapeo según el tipo (los encabezados del ERP son ambiguos) */
+  function adjustMapForType(map, type, headers){
+    map = Object.assign({}, map);
+    if(type==='ROTACION'){
+      // En el reporte de rotación, "Artículo" ES la descripción (texto largo, sin clave)
+      if(map.desc==null && map.code!=null){ map.desc=map.code; map.code=null; }
+    }
+    if(type==='VENTAS_CLI' || type==='CLI_ART' || type==='COBRANZA'){
+      // "Cliente" puede haberse mapeado a clientCode/code; asegurar client
+      if(map.client==null && map.code!=null){
+        const h = headers.find(x=>x.i===map.code);
+        if(h && /cliente/.test(h.key)){ map.client=map.code; map.code=null; }
+      }
+    }
+    if(type==='DRVETS'){
+      // "Importe neto" debe ser amount; "Total" NO debe robarle la columna a amount
+      if(map.amount==null && map.total!=null){ map.amount=map.total; map.total=null; }
+    }
+    if(type==='INACTIVOS'){
+      // la columna "Venta" del reporte de inactivos no es un importe a usar
+      if(map.amount!=null) map.amount=null;
+    }
+    return map;
+  }
+
+  /* ============================================================
+     analyzeSheet: análisis integral de una hoja
+     1) tipo por título (lo más confiable) o por columnas/nombre
+     2) fila de encabezados y mapeo por sinónimos
+     3) inferencia por contenido de columnas sin encabezado
+     4) periodo del reporte (fechas en el título)
+     Devuelve {type, map, grouped, ignored, headerIdx, headers, period}
+     ============================================================ */
+  function analyzeSheet(aoa, filename){
+    const period = detectPeriod(aoa);
+    const byTitle = detectByTitle(aoa);
+    if(byTitle && byTitle.ignored)
+      return {type:null, ignored:byTitle.ignored, map:{}, grouped:false, headerIdx:0, headers:[], period};
+
+    let headerIdx = findHeaderRow(aoa);
+    let headers = headerCells(aoa, headerIdx);
+    let type = byTitle ? byTitle.type : null;
+    let grouped = !!(byTitle && byTitle.grouped);
+    let map;
+
+    if(type){
+      map = adjustMapForType(autoMapColumns(headers), type, headers);
+    }else{
+      const det = detectType(headers, filename);
+      type = det.type;
+      map = adjustMapForType(det.map, type, headers);
+    }
+    if(type && !grouped) map = inferColumnsByContent(aoa, headerIdx, map, type);
+    return {type, map, grouped, ignored:null, headerIdx, headers, period};
+  }
+
+  /* ---------- parser: Cliente×Artículo agrupado por bloques ----------
+     Estructura real: fila [cveCliente,…,NOMBRE] → header "Artículo … Venta/Unidades"
+     → filas de artículos (desc en col sin encabezado) → siguiente cliente. */
+  function parseGroupedCliArt(aoa, warnings){
+    const out = [];
+    let cli = null, sub = null;   // sub = mapeo del bloque actual
+    const isNoise = s => /^pagina\s*\d|^page\s*\d|^hoja\s*\d|^periodo\b|^del?\s+\d|ventas por cliente|harvin/i.test(s);
+    const looksClientRow = row => {
+      const c0 = row[0];
+      if(c0==null || strip(c0)==='articulo' || strip(c0)==='cliente') return false;
+      const name = row.slice(1).find(c=>typeof c==='string' && c.trim().length>=4);
+      if(!name || isNoise(strip(name))) return false;
+      return row.filter(c=>typeof c==='number').length===0;
+    };
+    for(let i=0;i<aoa.length;i++){
+      const row = aoa[i]||[];
+      if(!row.some(c=>c!=null && c!=='')) continue;
+      const c0s = strip(row[0]);
+      if(/^total\b/.test(c0s) || isNoise(c0s)) continue;
+      // pies/encabezados de página en cualquier columna: ignorar sin cambiar de cliente
+      if(row.every(c=>c==null||c===''||(typeof c==='string'&&isNoise(strip(c))))) continue;
+      if(c0s==='articulo'){
+        // header del bloque: ubicar venta/unidades en ESTA fila
+        sub = {amount:null, units:null};
+        row.forEach((c,ci)=>{
+          const k=strip(c);
+          if(k==='venta'||k==='importe') sub.amount=ci;
+          else if(k==='unidades'||k==='cantidad') sub.units=ci;
+        });
+        continue;
+      }
+      if(looksClientRow(row)){
+        const name = row.slice(1).find(c=>typeof c==='string' && c.trim());
+        cli = String(name).trim();
+        continue;
+      }
+      if(cli && sub && sub.amount!=null){
+        // subtotales del bloque ("Total <CLIENTE>") pueden venir en CUALQUIER columna
+        if(row.some(c=>typeof c==='string' && /^total\b/i.test(c.trim()))) continue;
+        const code = row[0]!=null ? String(row[0]).trim() : '';
+        const desc = row.slice(1, sub.amount).find(c=>typeof c==='string' && c.trim().length>=6);
+        const venta = num(row[sub.amount]);
+        if(!code && !desc) continue;
+        if(!venta && !num(row[sub.units!=null?sub.units:-1])) continue;
+        out.push({cli, code, desc: desc?String(desc).trim():'', u: sub.units!=null?num(row[sub.units]):0, venta});
+      }
+    }
+    if(!out.length && warnings) warnings.push('El reporte Cliente×Artículo (agrupado) no produjo filas.');
+    return out;
+  }
+
+  /* ---------- parser: Cobranza agrupada por bloques ----------
+     Estructura real: fila CLIENTE → sub-header Concepto/Folio/Fecha/Vence/Atraso/Saldo
+     → una fila por factura pendiente → subtotal del cliente (solo saldo). */
+  function parseGroupedCobranza(aoa, warnings){
+    const out = [];
+    let cli = null, sub = null;
+    for(let i=0;i<aoa.length;i++){
+      const row = aoa[i]||[];
+      if(!row.some(c=>c!=null && c!=='')) continue;
+      const keys = row.map(strip);
+      if(keys.includes('concepto') && keys.includes('saldo')){
+        sub = {folio:keys.indexOf('folio'), atraso:keys.indexOf('atraso'), saldo:keys.indexOf('saldo'),
+               vence:keys.indexOf('vence'), concepto:keys.indexOf('concepto')};
+        continue;
+      }
+      const c0 = row[0];
+      const noise = s => /^pagina\s*\d|^page\s*\d|^al?\s+\d|cobranza|harvin|contactos|telefonos/i.test(s);
+      if(typeof c0==='string' && c0.trim() && !/^total\b/i.test(c0.trim()) && !noise(strip(c0)) &&
+         strip(c0)!=='cliente' && row.filter(c=>typeof c==='number').length===0){
+        const others = row.slice(1).filter(c=>typeof c==='string'&&c.trim());
+        if(!others.length || !others.every(o=>noise(strip(o)))) { cli = c0.trim(); continue; }
+        continue;
+      }
+      if(cli && sub && sub.saldo>-1){
+        const saldo = num(row[sub.saldo]);
+        if(!saldo) continue;
+        const hasFolio = sub.folio>-1 && row[sub.folio]!=null && String(row[sub.folio]).trim()!=='';
+        if(!hasFolio) continue;  // fila de subtotal del cliente (solo saldo): se ignora, sumamos facturas
+        const dias = sub.atraso>-1 && row[sub.atraso]!=null ? num(row[sub.atraso]) : null;
+        out.push({cliente:cli, saldo, dias, facturas:1});
+      }
+    }
+    if(!out.length && warnings) warnings.push('El reporte de cobranza (agrupado) no produjo filas.');
+    return out;
+  }
+
   /* Convierte la hoja a registros normalizados según tipo + mapeo */
-  function normalizeRows(aoa, headerIdx, type, map, warnings){
+  function normalizeRows(aoa, headerIdx, type, map, warnings, grouped){
+    if(grouped && type==='CLI_ART')  return parseGroupedCliArt(aoa, warnings);
+    if(grouped && type==='COBRANZA') return parseGroupedCobranza(aoa, warnings);
     const out = [];
     const T = REPORT_TYPES[type];
     if(!T) return out;
     const missing = T.req.filter(f=>map[f]==null);
     if(missing.length) throw new Error(`Faltan columnas obligatorias (${missing.join(', ')}) para "${T.nombre}". Asigna las columnas manualmente.`);
     const get = (row,f)=> map[f]==null ? null : row[map[f]];
-    const isTotalRow = (txt)=>/^(total|totales|suma|gran total|subtotal)/.test(strip(txt));
+    const isTotalRow = (txt)=>/^(total|totales|suma|gran total|subtotal)\b/.test(strip(txt)) || /articulos? sin existencia/.test(strip(txt));
 
     for(let i=headerIdx+1;i<aoa.length;i++){
       const row = aoa[i]||[];
@@ -229,6 +517,16 @@
         out.push({cliente:cli, saldo:num(get(row,'balance')),
                   dias: map.days!=null ? num(get(row,'days')) : null,
                   facturas: map.invoices!=null ? Math.round(num(get(row,'invoices'))) : 1});
+      }else if(type==='DRVETS'){
+        const folio = String(get(row,'folio')??'').trim();
+        if(!folio) continue;
+        const neto = num(get(row,'amount'));
+        let iva = map.tax!=null ? num(get(row,'tax')) : null;
+        const total = map.total!=null ? num(get(row,'total')) : null;
+        if(iva==null && total!=null) iva = round2(total-neto);
+        out.push({folio, cliente:String(get(row,'client')??'').trim(),
+                  neto:round2(neto), iva: iva!=null?round2(iva):null,
+                  total: total!=null?round2(total):round2(neto+(iva||0))});
       }
     }
     if(!out.length && warnings) warnings.push(`El reporte "${T.nombre}" no produjo filas válidas — revisa el mapeo de columnas.`);
@@ -238,9 +536,9 @@
   /* ================= almacén crudo (raw store) ================= */
   function emptyStore(){
     return {
-      version:1,
+      version:2,
       meta:{empresa:'HARVIN DISTRIBUCIONES', inicio:null, corte:null, dias:0, facturas:null, iva:null, actualizado:null},
-      ventasArt:{}, ventasCli:{}, cliArt:[], exival:{}, inactivosUV:{}, rotacion:[], cobranza:[]
+      ventasArt:{}, ventasCli:{}, cliArt:[], exival:{}, inactivosUV:{}, rotacion:[], cobranza:[], drvets:{}
     };
   }
 
@@ -291,6 +589,10 @@
       store.rotacion = records;
     }else if(type==='COBRANZA'){
       store.cobranza = records;
+    }else if(type==='DRVETS'){
+      // por FOLIO: acumular es idempotente (re-subir una semana no duplica facturas)
+      if(!acum || !store.drvets) store.drvets = {};
+      records.forEach(r=>{ store.drvets[r.folio] = {cliente:r.cliente, neto:r.neto, iva:r.iva, total:r.total}; });
     }
   }
 
@@ -310,6 +612,8 @@
 
     const ventasArr = Object.entries(store.ventasArt).map(([code,v])=>({code, desc:v.desc, u:v.u, venta:v.venta}))
                             .filter(r=>r.venta!==0 || r.u!==0);
+    const drvetsArr = Object.values(store.drvets||{});
+    const hayDrvets = drvetsArr.length>0;
     const hayVentas = ventasArr.length>0;
     const hayExival = Object.keys(store.exival).length>0;
     const hayCli    = Object.keys(store.ventasCli).length>0;
@@ -317,14 +621,30 @@
     const hayCob    = store.cobranza.length>0;
     const hayRot    = store.rotacion.length>0;
 
-    /* ---------- VENTAS ---------- */
+    /* ---------- VENTAS ----------
+       neto/IVA/facturas: del DIARIO DE VENTAS (DRVETS) si está cargado — es la
+       fuente contable, una fila por factura con neto, impuesto y total. El
+       detalle por artículo (VENTAS_ART) alimenta margen, líneas, top SKUs. */
     let ventas;
-    if(hayVentas){
-      const neto = round2(ventasArr.reduce((s,r)=>s+r.venta,0));
+    if(hayVentas || hayDrvets){
+      const netoDetalle = round2(ventasArr.reduce((s,r)=>s+r.venta,0));
       const unidades = Math.round(ventasArr.reduce((s,r)=>s+r.u,0));
-      const iva = meta.iva!=null ? round2(meta.iva) : round2(neto*0.16);
-      const documentos = meta.facturas!=null ? meta.facturas : (B.ventas?B.ventas.documentos:0);
-      if(meta.facturas==null) W.push('No se indicó el número de facturas del periodo; se conservó el valor anterior. El ticket promedio depende de este dato.');
+      let neto, iva, documentos;
+      if(hayDrvets){
+        neto = round2(drvetsArr.reduce((s,r)=>s+r.neto,0));
+        const ivaSum = round2(drvetsArr.reduce((s,r)=>s+(r.iva||0),0));
+        iva = ivaSum || round2(neto*0.16);
+        documentos = drvetsArr.length;
+        if(hayVentas && neto>0){
+          const diff = Math.abs(neto-netoDetalle)/neto;
+          if(diff>0.005) W.push(`El diario de ventas reporta ${neto.toLocaleString('es-MX',{style:'currency',currency:'MXN'})} y el detalle por artículo ${netoDetalle.toLocaleString('es-MX',{style:'currency',currency:'MXN'})} (${(diff*100).toFixed(1)}% de diferencia). Suele deberse a conceptos facturados que no son artículos (fletes, cargos); se usó el diario como cifra oficial de ventas.`);
+        }
+      }else{
+        neto = netoDetalle;
+        iva = meta.iva!=null ? round2(meta.iva) : round2(neto*0.16);
+        documentos = meta.facturas!=null ? meta.facturas : (B.ventas?B.ventas.documentos:0);
+        W.push('No se cargó el diario de ventas (facturas): el número de facturas y el IVA se estimaron. Carga el reporte "Diarios de ventas" para cifras exactas.');
+      }
       ventas = { neto, iva, total: round2(neto+iva), documentos,
                  ticket_promedio: round2(safeDiv(neto, documentos)),
                  unidades_vendidas: unidades, skus_vendidos: ventasArr.length };
@@ -624,7 +944,7 @@
 
   const API = { strip, num, classifyLinea, REPORT_TYPES, FIELD_SYNONYMS,
                 parseFile, findHeaderRow, headerCells, autoMapColumns, detectType,
-                normalizeRows, emptyStore, mergeIntoStore, buildHarvin };
+                analyzeSheet, detectPeriod, normalizeRows, emptyStore, mergeIntoStore, buildHarvin };
   if(typeof module!=='undefined' && module.exports) module.exports = API;
   global.HINGEST = API;
 })(typeof window!=='undefined' ? window : globalThis);

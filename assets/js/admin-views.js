@@ -57,10 +57,10 @@ function showLoginGate(onSuccess){
 
 /* =================== ESTADO DE LA ACTUALIZACIÓN =================== */
 const UPD = {
-  files: [],          // {name, sheets[], sheetIdx, headerIdx, headers[], type, map{}, rows, status, error}
+  files: [],          // {name, sheets[], sheetIdx, headerIdx, headers[], type, map{}, grouped, ignored, period, status, error}
   store: null,        // raw store resultante
   result: null,       // {data, warnings}
-  modo: 'reemplazar'
+  modo: 'auto'
 };
 
 function escA(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
@@ -78,17 +78,16 @@ VIEWS.actualizar = ()=>{
     <div class="adm-grid">
       <div class="fld"><label>Fecha de inicio del periodo</label><input type="date" id="up-inicio" value="${escA(rawStoreMetaGuess('inicio') || '2026-01-01')}"></div>
       <div class="fld"><label>Fecha de corte (datos al…)</label><input type="date" id="up-corte" value="${escA(corteDefault)}"></div>
-      <div class="fld"><label>Núm. de facturas del periodo</label><input type="number" id="up-fact" min="0" placeholder="opcional" value="${meta.dias?'' : ''}"></div>
-      <div class="fld"><label>IVA total (MXN, opcional)</label><input type="number" id="up-iva" min="0" step="0.01" placeholder="auto: 16% del neto"></div>
       <div class="fld">
         <label>Modo de integración</label>
         <select id="up-modo">
-          <option value="reemplazar" selected>Reemplazar — los reportes cubren TODO el periodo (recomendado)</option>
-          <option value="acumular">Acumular — sumar ventas de la semana sobre lo ya publicado</option>
+          <option value="auto" selected>Automático — según las fechas de los reportes (recomendado)</option>
+          <option value="reemplazar">Reemplazar — los reportes cubren TODO el periodo</option>
+          <option value="acumular">Acumular — sumar ventas nuevas sobre lo ya publicado</option>
         </select>
       </div>
     </div>
-    <div class="note">En modo <b>Acumular</b>, las ventas (por artículo, por cliente y cliente×artículo) se SUMAN al histórico publicado; existencia, cobranza, rotación e inactivos siempre se toman del archivo más reciente porque son fotografías del momento.</div>
+    <div class="note">Las <b>fechas se detectan solas</b> del título de los reportes al cargarlos (puedes corregirlas). El <b>número de facturas y el IVA</b> se obtienen del reporte <b>Diarios de ventas</b> automáticamente. En <b>Automático</b>: si los reportes cubren todo el periodo desde el inicio, se reemplaza; si solo traen días nuevos posteriores al último corte publicado, las ventas se acumulan al histórico. Existencia, cobranza, rotación e inactivos siempre se toman del archivo más reciente porque son fotografías del momento.</div>
   </div>
 
   <div class="card pad-lg" style="margin-top:16px">
@@ -181,12 +180,25 @@ async function handleFiles(fileList){
 function selectSheet(item, idx){
   item.sheetIdx = idx;
   const aoa = item.sheets[idx].aoa;
-  item.headerIdx = HINGEST.findHeaderRow(aoa);
-  item.headers = HINGEST.headerCells(aoa, item.headerIdx);
-  const det = HINGEST.detectType(item.headers, item.name);
-  item.type = det.type;
-  item.map = det.map;
-  item.rowsCount = Math.max(0, aoa.length - item.headerIdx - 1);
+  const a = HINGEST.analyzeSheet(aoa, item.name);
+  item.headerIdx = a.headerIdx;
+  item.headers = a.headers;
+  item.type = a.type;
+  item.map = a.map;
+  item.grouped = a.grouped;
+  item.ignored = a.ignored;
+  item.period = a.period;
+  item.rowsCount = Math.max(0, aoa.length - a.headerIdx - 1);
+  autofillPeriod();
+}
+
+/* Autollenar inicio/corte con las fechas detectadas en los títulos de los reportes */
+function autofillPeriod(){
+  const ins = UPD.files.map(f=>f.period&&f.period.inicio).filter(Boolean).sort();
+  const cors = UPD.files.map(f=>f.period&&f.period.corte).filter(Boolean).sort();
+  const i = document.getElementById('up-inicio'), c = document.getElementById('up-corte');
+  if(i && ins.length) i.value = ins[0];
+  if(c && cors.length) c.value = cors[cors.length-1];
 }
 
 function renderFileList(){
@@ -197,8 +209,20 @@ function renderFileList(){
     const T = HINGEST.REPORT_TYPES;
     const typeOpts = Object.entries(T).map(([k,v])=>`<option value="${k}" ${f.type===k?'selected':''}>${v.nombre}</option>`).join('');
     const sheetOpts = (f.sheets||[]).map((s,i)=>`<option value="${i}" ${i===f.sheetIdx?'selected':''}>${escA(s.name)}</option>`).join('');
+    if(f.ignored){
+      return `<div class="file-card">
+        <div class="fc-head">
+          <span class="fc-name">${svg(I.doc)} ${escA(f.name)}</span>
+          <span class="tag violet">No requerido</span>
+          <span class="fc-meta">${escA(f.ignored)}: este reporte no alimenta el tablero y se omitirá.</span>
+          <button class="btn btn-xs" data-rm="${fi}">Quitar</button>
+        </div>
+      </div>`;
+    }
     let mapping = '';
-    if(f.type && f.headers.length){
+    if(f.grouped && f.type){
+      mapping = `<div class="note" style="margin-top:2px">Formato <b>agrupado por bloques</b> detectado (${escA(T[f.type].nombre)}): las columnas se interpretan automáticamente, no requiere mapeo manual.</div>`;
+    }else if(f.type && f.headers.length){
       const fields = [...T[f.type].req, ...T[f.type].opt];
       mapping = `<div class="map-grid">` + fields.map(field=>{
         const req = T[f.type].req.includes(field);
@@ -213,7 +237,7 @@ function renderFileList(){
     return `<div class="file-card ${f.status==='error'?'err':''}">
       <div class="fc-head">
         <span class="fc-name">${svg(I.doc)} ${escA(f.name)}</span>
-        <span class="fc-meta">${f.rowsCount?fNum(f.rowsCount)+' filas':''} · ${f.status}${f.error?' — '+escA(f.error):''}</span>
+        <span class="fc-meta">${f.rowsCount?fNum(f.rowsCount)+' filas':''} · ${f.status}${f.period&&f.period.corte?' · periodo detectado: '+escA((f.period.inicio||'…')+' → '+f.period.corte):''}${f.error?' — '+escA(f.error):''}</span>
         <button class="btn btn-xs" data-rm="${fi}">Quitar</button>
       </div>
       ${f.sheets ? `<div class="fc-row">
@@ -266,43 +290,54 @@ async function processAll(){
   msg.className='proc-msg'; msg.textContent='Procesando…';
   UPD.result = null;
   try{
-    const ready = UPD.files.filter(f=>f.sheets && f.type);
-    if(!ready.length) throw new Error('Carga al menos un reporte y asigna su tipo.');
+    const ready = UPD.files.filter(f=>f.sheets && f.type && !f.ignored);
+    if(!ready.length) throw new Error('Carga al menos un reporte válido del ERP.');
     const inicio = $('up-inicio').value, corte = $('up-corte').value;
     if(!inicio || !corte) throw new Error('Indica fecha de inicio y fecha de corte del periodo.');
     const d0=new Date(inicio+'T00:00:00'), d1=new Date(corte+'T00:00:00');
     const dias = Math.round((d1-d0)/86400000)+1;
     if(!(dias>0)) throw new Error('La fecha de corte debe ser posterior a la de inicio.');
-    UPD.modo = $('up-modo').value;
+    const warnings = [];
 
-    let store;
-    if(UPD.modo==='acumular'){
-      store = await loadPreviousRawStore();
-      if(!store || !Object.keys(store.ventasArt||{}).length){
-        throw new Error('Modo Acumular requiere un raw-store publicado previamente con ventas. Publica primero una actualización en modo Reemplazar.');
+    /* ----- resolución del modo (automático según fechas) ----- */
+    const previo = await loadPreviousRawStore();
+    const tienePrevio = !!(previo && Object.keys(previo.ventasArt||{}).length);
+    let modoSel = $('up-modo').value;
+    let modo = modoSel;
+    if(modoSel==='auto'){
+      if(!tienePrevio){
+        modo='reemplazar';
+        warnings.push('Automático: no hay histórico publicado, se integró todo como periodo completo.');
+      }else if(previo.meta && previo.meta.inicio && inicio<=previo.meta.inicio){
+        modo='reemplazar';   // los reportes cubren desde el inicio del histórico (o antes)
+      }else if(previo.meta && previo.meta.corte && inicio>previo.meta.corte){
+        modo='acumular';     // los reportes traen SOLO días posteriores al último corte
+        warnings.push(`Automático: los reportes inician el ${inicio}, después del último corte publicado (${previo.meta.corte}); las ventas se ACUMULARON al histórico.`);
+      }else{
+        throw new Error(`Los reportes inician el ${inicio} pero el histórico publicado va del ${previo.meta.inicio} al ${previo.meta.corte}: el periodo se traslapa parcialmente y acumular duplicaría ventas. Exporta los reportes desde ${previo.meta.inicio} (para Reemplazar) o desde el día siguiente al último corte (para Acumular).`);
       }
-    }else{
-      store = HINGEST.emptyStore();
     }
+    if(modo==='acumular'){
+      if(!tienePrevio) throw new Error('Acumular requiere un histórico publicado con ventas. Publica primero una actualización completa (Reemplazar).');
+      if(previo.meta && previo.meta.corte && inicio<=previo.meta.corte)
+        warnings.push(`Cuidado: los reportes inician el ${inicio} y el histórico publicado llega al ${previo.meta.corte}. Si los reportes incluyen días ya publicados, las ventas de esos días se DUPLICARÁN.`);
+    }
+    UPD.modo = modo;
+
+    const store = (modo==='acumular') ? previo : HINGEST.emptyStore();
     store.meta = store.meta || {};
     store.meta.empresa = 'HARVIN DISTRIBUCIONES';
-    store.meta.inicio = UPD.modo==='acumular' ? (store.meta.inicio||inicio) : inicio;
+    store.meta.inicio = modo==='acumular' ? (store.meta.inicio||inicio) : inicio;
     store.meta.corte = corte;
     {
       const di=new Date(store.meta.inicio+'T00:00:00');
       store.meta.dias = Math.round((d1-di)/86400000)+1;
     }
-    const fact = $('up-fact').value, iva = $('up-iva').value;
-    if(fact!==''){
-      const f = Math.round(+fact);
-      store.meta.facturas = UPD.modo==='acumular' ? (Number(store.meta.facturas)||0)+f : f;
-    }else if(UPD.modo!=='acumular'){ store.meta.facturas = null; }
-    store.meta.iva = iva!=='' ? +iva : null;
+    // facturas e IVA se derivan del Diario de ventas (DRVETS) en buildHarvin
     store.meta.actualizado = new Date().toISOString();
 
-    const warnings = [];
     // EXIVAL primero: las descripciones/costos sirven a los demás
-    const order = ['EXIVAL','INACTIVOS','VENTAS_ART','VENTAS_CLI','CLI_ART','ROTACION','COBRANZA'];
+    const order = ['EXIVAL','INACTIVOS','VENTAS_ART','VENTAS_CLI','CLI_ART','ROTACION','COBRANZA','DRVETS'];
     const byType = {};
     ready.forEach(f=>{ (byType[f.type]=byType[f.type]||[]).push(f); });
     const dup = Object.entries(byType).filter(([,v])=>v.length>1).map(([k])=>HINGEST.REPORT_TYPES[k].nombre);
@@ -311,9 +346,9 @@ async function processAll(){
     for(const t of order){
       for(const f of (byType[t]||[])){
         const aoa = f.sheets[f.sheetIdx].aoa;
-        const rows = HINGEST.normalizeRows(aoa, f.headerIdx, f.type, f.map, warnings);
+        const rows = HINGEST.normalizeRows(aoa, f.headerIdx, f.type, f.map, warnings, f.grouped);
         // dentro de una misma corrida, archivos repetidos del mismo tipo se acumulan entre sí
-        const modoArchivo = (UPD.modo==='acumular' || (byType[t].indexOf(f)>0)) ? 'acumular' : 'reemplazar';
+        const modoArchivo = (modo==='acumular' || (byType[t].indexOf(f)>0)) ? 'acumular' : 'reemplazar';
         HINGEST.mergeIntoStore(store, f.type, rows, modoArchivo);
         f.status = fNum(rows.length)+' filas integradas';
       }
@@ -322,7 +357,8 @@ async function processAll(){
     const res = HINGEST.buildHarvin(store, window.HARVIN);
     res.warnings = [...warnings, ...res.warnings];
     UPD.store = store; UPD.result = res;
-    msg.className='proc-msg ok'; msg.textContent='Consolidación lista. Revisa la previsualización.';
+    msg.className='proc-msg ok';
+    msg.textContent='Consolidación lista (modo '+(modoSel==='auto'?'automático → ':'')+modo+'). Revisa la previsualización.';
     renderFileList();
     renderPreview();
   }catch(e){
@@ -359,7 +395,9 @@ function renderPreview(){
       ${row('SKUs vendidos', P.skus_vendidos, N.skus_vendidos, v=>fNum(v))}
       ${row('Unidades vendidas', P.unidades_vendidas, N.unidades_vendidas, v=>fNum(v))}
       ${row('Facturas', P.facturas, N.facturas, v=>fNum(v))}
+      ${row('IVA del periodo', (prev.ventas||{}).iva, (nu.ventas||{}).iva)}
     </tbody></table></div>
+    <div class="note">El número de facturas y el IVA se tomaron del reporte <b>Diarios de ventas</b>; las fechas, de los títulos de los reportes.</div>
     <div class="prev-meta">Nuevo periodo: <b>${escA(N.periodo||'')}</b></div>
     ${UPD.result.warnings.length? `<div class="insight warn" style="margin-top:14px"><div class="ic">${svg(I.alert)}</div><div><h4>Advertencias (${UPD.result.warnings.length})</h4><p>${UPD.result.warnings.map(escA).join('<br>')}</p></div></div>`:''}
   `;
