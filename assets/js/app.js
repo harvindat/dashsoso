@@ -251,6 +251,7 @@ function semanalData(){
     actual:{ ventas:vSem, facturas:Math.round(fd*dt), ticket:r.ticket_promedio||0, clientes:r.clientes_activos||0,
              margen_estimado: Math.round(vSem*(r.margen_pct||0))/100, unidades_estimadas: Math.round((r.unidades_vendidas||0)/dias*dt) },
     anterior:null, variacion:null, por_dia:porDia, top_clientes_semana:null,
+    recuperacion:{modo:'no_data',importe:null,cobros:0,anterior:null,variacion_pct:null,ticket:0,por_dia:null,por_forma:null,cobros_con_fecha:0,cobros_sin_fecha:0},
     promedio_diario_periodo: Math.round(pd*100)/100,
     participacion_pct: Math.round((vSem/(r.ventas_netas||1))*10000)/100,
     facturas_con_fecha:0, facturas_sin_fecha:(v.documentos||0), margen_pct_referencia:r.margen_pct||0 };
@@ -264,6 +265,13 @@ VIEWS.semanal = ()=>{
     return {html: sHead('Resumen Semanal','No hay fecha de corte en los datos publicados. Carga reportes en "Actualizar Datos" indicando el periodo.')};
   }
   const A = S.actual, est = S.modo==='estimado';
+  const R = S.recuperacion || {modo:'no_data',importe:null,cobros:0,anterior:null,variacion_pct:null,ticket:0,por_dia:null,por_forma:null};
+  const recReal = R.modo==='real';
+  const recVal = (R.importe==null) ? '—' : fCompact(R.importe);
+  const recSub = R.modo==='no_data' ? 'carga el reporte de Cobros'
+               : R.modo==='sin_fecha' ? `${fNum(R.cobros)} cobros (total cargado, sin fecha)`
+               : `${fNum(R.cobros)} cobros ingresados al banco`;
+  const idxCobranza = (recReal && A.ventas>0 && R.importe!=null) ? Math.round(R.importe/A.ventas*1000)/10 : null;
   const estTag = est ? `<span class="tag red">Estimación</span>` : `<span class="tag teal">Cifras reales</span>`;
   const estadoSem = S.completa ? 'Semana cerrada' : `Semana en curso · día ${S.dias_transcurridos} de 7`;
   const banner = est ? insight('crit',I.alert,'Modo estimación proporcional',
@@ -290,6 +298,28 @@ VIEWS.semanal = ()=>{
       </tbody></table></div>
     </div>` : '';
 
+  const formaColors = ['#3ddc97','#36d6c3','#8b7cf6','#e23440','#f0b34a','#5f6c84'];
+  const recBlock = (R.modo==='no_data') ? `
+    ${sHead('Recuperación de la semana','Ingreso cobrado que entró a la cuenta de banco (reporte de Cobros).')}
+    ${insight('crit',I.cash,'Reporte de Cobros no cargado','Para ver la <b>Recuperación Semanal</b> con cifras reales, carga el reporte <b>"Cobros realizados"</b> en <b>Actualizar Datos</b>. Idealmente con las columnas <b>Fecha</b> e <b>Importe cobrado</b> para acotar el ingreso a la semana de corte.')}`
+    : (R.modo==='sin_fecha') ? `
+    ${sHead('Recuperación de la semana','Ingreso cobrado que entró a la cuenta de banco (reporte de Cobros).')}
+    ${insight('crit',I.cash,'Cobros sin fecha: total del archivo cargado',`El reporte de Cobros cargado suma <b>${fMX(R.importe)}</b> en <b>${fNum(R.cobros)}</b> movimientos, pero no trae columna <b>Fecha</b>, así que no puede acotarse a la semana ${fFechaL(S.inicio)} — ${fFechaL(S.fin_efectivo)}. Mapea la columna Fecha del reporte para que la recuperación corresponda solo a la semana de corte.`)}`
+    : `
+    ${sHead('Recuperación de la semana','Cobros que ingresaron al banco dentro de la semana de corte (sábado a viernes).')}
+    <div class="grid g-2">
+      <div class="card pad-lg">
+        <div class="card-h"><span class="t">Recuperación por día · ${fFechaL(S.inicio)} — ${fFechaL(S.fin_efectivo)}</span><span class="tag green">Ingreso</span></div>
+        <div id="c_rec_dias" class="chart h-md"></div>
+        <div class="note">Total recuperado en la semana: <b style="color:var(--green)">${fMX(R.importe)}</b> en ${fNum(R.cobros)} cobros${R.anterior!=null?` · semana anterior: ${fCompact(R.anterior)}`:''}.</div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">Por forma de cobro</span><span class="tag teal">${fNum((R.por_forma||[]).length)}</span></div>
+        ${(R.por_forma&&R.por_forma.length)?R.por_forma.map((f,i)=>`<div class="prow"><span class="nm">${trunc(f.forma||'Sin especificar',24)}</span><div class="track"><i style="width:${Math.max(3,f.importe/R.importe*100)}%;background:${formaColors[i%formaColors.length]}"></i></div><span class="vv">${fCompact(f.importe)}</span></div>`).join(''):'<div class="note">El reporte no detalla la forma de cobro.</div>'}
+        <div class="note" style="margin-top:12px">El ticket promedio de cobro fue <b>${fMX(R.ticket)}</b>.</div>
+      </div>
+    </div>`;
+
   const html = `
   <div class="cover">
     <div class="eyebrow">Semana de corte · sábado a viernes</div>
@@ -301,15 +331,15 @@ VIEWS.semanal = ()=>{
 
   <div class="grid g-4" style="margin-top:14px">
     ${kpi({lbl:'Ventas de la Semana',val:fCompact(A.ventas),sub:`${fNum(A.facturas)} facturas en ${fNum(S.dias_transcurridos)} días`,ico:I.sales,cls:'feat',glow:'rgba(226,52,64,.25)'})}
+    ${kpi({lbl:'Recuperación Semanal',val:recVal,sub:recSub,ico:I.cash,cls:recReal?'feat':'',glow:'rgba(61,220,151,.22)'})}
     ${kpi({lbl:'Ticket Promedio',val:fMX(A.ticket),sub: est?'referencia del periodo':'de las facturas de la semana',ico:I.doc,glow:'rgba(54,214,195,.16)'})}
     ${kpi({lbl:'Margen Bruto Semanal',val:fCompact(A.margen_estimado),sub:`estimado al ${fPct(S.margen_pct_referencia)} del periodo`,ico:I.margin,glow:'rgba(139,124,246,.16)'})}
-    ${kpi({lbl:'Participación del Periodo',val:fPct(S.participacion_pct),sub:`de ${fCompact(D.resumen.ventas_netas)} acumulados`,ico:I.trend,glow:'rgba(61,220,151,.16)'})}
   </div>
   <div class="grid g-4" style="margin-top:16px">
     ${kpi({lbl:'Facturas Emitidas',val:fNum(A.facturas),sub:`${fNum(A.facturas/Math.max(1,S.dias_transcurridos),1)} por día`,ico:I.doc})}
-    ${kpi({lbl:'Unidades (est.)',val:fNum(A.unidades_estimadas),unit:'pzas',sub:'proporcional al ritmo de venta',ico:I.pkg})}
+    ${kpi({lbl:'Participación del Periodo',val:fPct(S.participacion_pct),sub:`de ${fCompact(D.resumen.ventas_netas)} acumulados`,ico:I.trend})}
     ${kpi({lbl:'Clientes Atendidos',val:fNum(A.clientes),sub: est?'activos en el periodo (ref.)':'con factura en la semana',ico:I.users})}
-    ${kpi({lbl:'Promedio Diario',val:fCompact(A.ventas/Math.max(1,S.dias_transcurridos)),sub:`periodo: ${fCompact(S.promedio_diario_periodo)}/día`,ico:I.spark})}
+    ${kpi({lbl: recReal?'Índice de Cobranza':'Promedio Diario', val: (idxCobranza!=null?fPct(idxCobranza):fCompact(A.ventas/Math.max(1,S.dias_transcurridos))), sub: recReal?'recuperado vs. vendido en la semana':`periodo: ${fCompact(S.promedio_diario_periodo)}/día`, ico: recReal?I.rotate:I.spark})}
   </div>
 
   ${sHead('Comportamiento diario de la semana','Venta por día de la semana de corte (sábado a viernes).' + (est?' En modo estimación se muestra el promedio diario del periodo.':''))}
@@ -322,6 +352,7 @@ VIEWS.semanal = ()=>{
     ${compCard}
   </div>
   ${topCli}
+  ${recBlock}
 
   ${sHead('Lectura de la semana','Síntesis para la dirección.')}
   <div style="display:flex;flex-direction:column;gap:12px">
@@ -329,7 +360,11 @@ VIEWS.semanal = ()=>{
         'Venta '+(S.variacion.ventas_pct>=0?'creció ':'cayó ')+fPct(Math.abs(S.variacion.ventas_pct))+' vs. semana anterior',
         'La semana registró '+fMX(A.ventas)+' contra '+fMX(S.anterior.ventas)+' de la semana previa ('+fNum(A.facturas)+' vs '+fNum(S.anterior.facturas)+' facturas).')
       : insight('',I.trend,'Ritmo de la semana tipo','Al ritmo del periodo, una semana completa de corte genera ~'+fMX(A.ventas)+' con ~'+fNum(A.facturas)+' facturas y un margen bruto estimado de '+fMX(A.margen_estimado)+'.')}
-    ${insight('good',I.check,'Actualización continua','Este módulo se alimenta de los mismos reportes del ERP: al publicar nuevos datos, la semana de corte avanza sola y todos los KPIs (resumen, ventas, margen, inventario, cobranza) se recalculan en cadena.')}
+    ${recReal ? insight(idxCobranza>=80?'good':(idxCobranza>=50?'':'crit'), I.cash,
+        'Recuperación de '+fMX(R.importe)+' en la semana'+(R.variacion_pct!=null?(' ('+(R.variacion_pct>=0?'+':'')+fPct(R.variacion_pct)+' vs. semana anterior)'):''),
+        'Entró a banco el equivalente al '+fPct(idxCobranza)+' de lo vendido en la semana ('+fMX(A.ventas)+'). '+(idxCobranza>=80?'Buen ritmo de cobranza.':'Vigila la conversión de venta a efectivo.'))
+      : ''}
+    ${insight('good',I.check,'Actualización continua','Este módulo se alimenta de los mismos reportes del ERP: al publicar nuevos datos, la semana de corte avanza sola y todos los KPIs (resumen, ventas, margen, inventario, cobranza y recuperación) se recalculan en cadena.')}
   </div>`;
 
   const init = ()=>{
@@ -361,11 +396,19 @@ VIEWS.semanal = ()=>{
                 {value:Math.max(0,(D.resumen.ventas_netas||0)-A.ventas),name:'Resto del periodo',itemStyle:{color:'#243047'}}]}]
       });
     }
+    if(recReal && R.por_dia){
+      mk('c_rec_dias',{
+        tooltip:{trigger:'axis',axisPointer:{type:'shadow'},formatter:p=>{const d=R.por_dia[p[0].dataIndex];return `<b>${d.dia} ${fFecha(d.fecha)}</b><br>Recuperado: ${fMX(d.importe)}<br>Cobros: ${fNum(d.cobros)}`;}},
+        xAxis:{type:'category',data:R.por_dia.map(d=>d.dia+'\\n'+fFecha(d.fecha)),...axisStyle(),axisLabel:{color:C.txt,fontSize:10.5,lineHeight:14}},
+        yAxis:{type:'value',...axisStyle(),axisLabel:{color:C.txt,fontSize:11,formatter:v=>fCompact(v)}},
+        series:[{type:'bar',barWidth:'56%',
+          itemStyle:{borderRadius:[7,7,0,0],color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#7af0c0'},{offset:1,color:C.green}])},
+          data:R.por_dia.map(d=>d.importe)}]
+      });
+    }
   };
   return {html, init};
 };
-
-/* ---------- 2. VENTAS & FACTURACIÓN ---------- */
 VIEWS.ventas = ()=>{
   const v=D.ventas, abc=D.abc;
   const html=`

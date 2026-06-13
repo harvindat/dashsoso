@@ -348,7 +348,7 @@ async function processAll(){
     store.meta.actualizado = new Date().toISOString();
 
     // EXIVAL primero: las descripciones/costos sirven a los demás
-    const order = ['EXIVAL','INACTIVOS','VENTAS_ART','VENTAS_CLI','CLI_ART','ROTACION','COBRANZA','DRVETS'];
+    const order = ['EXIVAL','INACTIVOS','VENTAS_ART','VENTAS_CLI','CLI_ART','ROTACION','COBRANZA','COBROS','DRVETS'];
     const byType = {};
     ready.forEach(f=>{ (byType[f.type]=byType[f.type]||[]).push(f); });
     const dup = Object.entries(byType).filter(([,v])=>v.length>1).map(([k])=>HINGEST.REPORT_TYPES[k].nombre);

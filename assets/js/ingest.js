@@ -108,7 +108,10 @@
     folio:   ['folio','factura','no. factura','documento','no. documento'],
     tax:     ['impuesto','iva','impuestos'],
     total:   ['total','importe total','gran total'],
-    fecha:   ['fecha','fecha factura','fecha documento']
+    fecha:   ['fecha','fecha factura','fecha documento','fecha de cobro','fecha cobro','fecha de pago','fecha pago','fecha movimiento','fecha de movimiento'],
+    cobro:   ['importe cobrado','monto cobrado','cobrado','importe del cobro','importe de cobro','abono','pago','importe pagado','monto','cobro','recuperado','importe recuperado','depositado'],
+    recibo:  ['recibo','no. recibo','num recibo','folio cobro','folio de cobro','referencia','no. cobro','num cobro','poliza','folio recibo'],
+    forma:   ['forma de cobro','forma de pago','metodo de pago','metodo de cobro','tipo de cobro','via']
   };
 
   const REPORT_TYPES = {
@@ -119,13 +122,13 @@
     INACTIVOS: { nombre:'Artículos inactivos',          req:['code','lastSale'],              opt:['desc','stock','value'] },
     ROTACION:  { nombre:'Rotación de inventario',       req:['desc','outflow','avgInv'],      opt:['turnover','code'] },
     COBRANZA:  { nombre:'Cobranza / Cartera',           req:['client','balance'],             opt:['days','invoices'] },
+    COBROS:    { nombre:'Cobros realizados (recuperación)', req:['cobro'],                     opt:['fecha','client','recibo','forma','folio'] },
     DRVETS:    { nombre:'Diario de ventas (facturas)',  req:['folio','amount'],               opt:['client','tax','total','fecha'] }
   };
 
   /* Reportes del ERP que NO alimentan el tablero (se reconocen para avisar) */
   const IGNORED_TITLES = [
-    {re:/diarios? de compras/, nombre:'Diario de compras'},
-    {re:/^cobros?$|cobros realizados/, nombre:'Cobros realizados'}
+    {re:/diarios? de compras/, nombre:'Diario de compras'}
   ];
 
   /* ================= lectura de archivos ================= */
@@ -305,8 +308,9 @@
     let txt='';
     for(let i=0;i<lim;i++) txt += ' ' + (aoa[i]||[]).filter(c=>typeof c==='string').map(strip).join(' ');
     for(const ig of IGNORED_TITLES) if(ig.re.test(txt)) return {ignored:ig.nombre};
-    // Reporte de cobros realizados: encabezados "Forma de cobro"/"Cobrador" lo delatan
-    if(/forma de cobro|cobrador/.test(txt)) return {ignored:'Cobros realizados'};
+    // Reporte de COBROS realizados (recuperación): el título o los encabezados
+    // "Forma de cobro"/"Cobrador" lo delatan. Va ANTES que cobranza/cartera.
+    if(/cobros realizados|^cobros\b|recuperacion de cartera|relacion de cobros|forma de cobro|cobrador/.test(txt)) return {type:'COBROS'};
     if(/diarios? de ventas/.test(txt)) return {type:'DRVETS'};
     if(/ventas por articulo/.test(txt)) return {type:'VENTAS_ART'};
     if(/ventas por cliente/.test(txt)) return {type: isGroupedCliArt(aoa) ? 'CLI_ART' : 'VENTAS_CLI', grouped:isGroupedCliArt(aoa)};
@@ -329,6 +333,8 @@
     if(has('lastSale')) bump('INACTIVOS',4);
     if(has('outflow') && has('avgInv')) bump('ROTACION',5);
     if(has('balance')) bump('COBRANZA',4);
+    if(has('forma') || has('recibo')) bump('COBROS',5);                 // forma de cobro / recibo = cobros realizados
+    if((has('cobro')||has('amount')) && has('fecha') && !has('balance') && !has('stock') && !has('units')) bump('COBROS',2);
     if(has('client') && (has('code')||has('desc')) && has('amount')) bump('CLI_ART',3);
     if(has('client') && has('amount') && !has('code') && !has('desc')) bump('VENTAS_CLI',4);
     if(has('code') && has('units') && has('amount') && !has('client') && !has('stock')) bump('VENTAS_ART',4);
@@ -337,6 +343,7 @@
     if(/inact/.test(fn)) bump('INACTIVOS',3);
     if(/rot/.test(fn)) bump('ROTACION',3);
     if(/cobr|cartera|cxc/.test(fn)) bump('COBRANZA',3);
+    if(/cobros|recupera|pagos/.test(fn)) bump('COBROS',4);
     if(/vtsart|art/.test(fn)) bump('VENTAS_ART',2);
     if(/cliente.*art|art.*cliente|cliart|cruce/.test(fn)) bump('CLI_ART',3);
     if(/vtscli|cliente/.test(fn)) bump('VENTAS_CLI',2);
@@ -353,12 +360,17 @@
       // En el reporte de rotación, "Artículo" ES la descripción (texto largo, sin clave)
       if(map.desc==null && map.code!=null){ map.desc=map.code; map.code=null; }
     }
-    if(type==='VENTAS_CLI' || type==='CLI_ART' || type==='COBRANZA'){
+    if(type==='VENTAS_CLI' || type==='CLI_ART' || type==='COBRANZA' || type==='COBROS'){
       // "Cliente" puede haberse mapeado a clientCode/code; asegurar client
       if(map.client==null && map.code!=null){
         const h = headers.find(x=>x.i===map.code);
         if(h && /cliente/.test(h.key)){ map.client=map.code; map.code=null; }
       }
+    }
+    if(type==='COBROS'){
+      // El importe del cobro: usar columna específica de cobro; si no, el "importe" genérico
+      if(map.cobro==null && map.amount!=null){ map.cobro=map.amount; map.amount=null; }
+      if(map.cobro==null && map.total!=null){ map.cobro=map.total; map.total=null; }
     }
     if(type==='DRVETS'){
       // "Importe neto" debe ser amount; "Total" NO debe robarle la columna a amount
@@ -545,6 +557,15 @@
         out.push({cliente:cli, saldo:num(get(row,'balance')),
                   dias: map.days!=null ? num(get(row,'days')) : null,
                   facturas: map.invoices!=null ? Math.round(num(get(row,'invoices'))) : 1});
+      }else if(type==='COBROS'){
+        const importe = round2(num(get(row,'cobro')));
+        if(!importe) continue;                                   // ignora filas sin importe
+        const fecha  = map.fecha!=null  ? toISODate(get(row,'fecha')) : null;
+        const cliente= String(get(row,'client')??'').trim();
+        const recibo = map.recibo!=null ? String(get(row,'recibo')??'').trim()
+                     : (map.folio!=null ? String(get(row,'folio')??'').trim() : '');
+        const forma  = map.forma!=null  ? String(get(row,'forma')??'').trim() : '';
+        out.push({recibo, fecha, cliente, importe, forma});
       }else if(type==='DRVETS'){
         const folio = String(get(row,'folio')??'').trim();
         if(!folio) continue;
@@ -568,7 +589,7 @@
     return {
       version:2,
       meta:{empresa:'HARVIN DISTRIBUCIONES', inicio:null, corte:null, dias:0, facturas:null, iva:null, actualizado:null},
-      ventasArt:{}, ventasCli:{}, cliArt:[], exival:{}, inactivosUV:{}, rotacion:[], cobranza:[], drvets:{}
+      ventasArt:{}, ventasCli:{}, cliArt:[], exival:{}, inactivosUV:{}, rotacion:[], cobranza:[], cobros:{}, drvets:{}
     };
   }
 
@@ -619,6 +640,23 @@
       store.rotacion = records;
     }else if(type==='COBRANZA'){
       store.cobranza = records;
+    }else if(type==='COBROS'){
+      /* Cobros realizados = flujo de recuperación. Se acumula como historia
+         para soportar la vista semanal y futuras tendencias. Idempotente:
+         clave = recibo/referencia si existe; si no, huella fecha~cliente~importe~forma.
+         Re-subir un export con recibo no duplica; sin recibo, una huella idéntica
+         se considera el mismo cobro (riesgo mínimo de colisión, se avisa). */
+      if(!acum || !store.cobros) store.cobros = {};
+      let sinId = 0;
+      records.forEach(r=>{
+        const key = r.recibo
+          ? 'R:'+r.recibo
+          : 'H:'+(r.fecha||'')+'~'+(r.cliente||'').toUpperCase()+'~'+r.importe+'~'+(r.forma||'');
+        if(!r.recibo) sinId++;
+        store.cobros[key] = {fecha:r.fecha||null, cliente:r.cliente, importe:r.importe, forma:r.forma||''};
+      });
+      store.meta = store.meta || {};
+      store.meta._cobrosSinId = sinId;
     }else if(type==='DRVETS'){
       // por FOLIO: acumular es idempotente (re-subir una semana no duplica facturas)
       if(!acum || !store.drvets) store.drvets = {};
@@ -978,6 +1016,45 @@
       const factDia = safeDiv(ventas.documentos, dias);
 
       const enRango = (f,a,b)=> f>=a && f<=b;
+
+      /* ----- RECUPERACIÓN SEMANAL (cobros realizados que entraron al banco) ----- */
+      const cobrosArr = Object.values(store.cobros||{});
+      const cobConFecha = cobrosArr.filter(r=>r.fecha);
+      const sumImp = arr => round2(arr.reduce((s,r)=>s+(r.importe||0),0));
+      let recuperacion;
+      if(cobConFecha.length){
+        const cs = cobConFecha.filter(r=>enRango(r.fecha, ini, finEf));
+        const cp = cobConFecha.filter(r=>enRango(r.fecha, iniPrev, finPrev));
+        const recSem = sumImp(cs), recPrev = sumImp(cp);
+        const recDia = [];
+        for(let f=ini; f<=finEf; f=isoAdd(f,1)){
+          const del = cs.filter(r=>r.fecha===f);
+          recDia.push({fecha:f, dia:DIA[isoToDate(f).getDay()], importe:sumImp(del), cobros:del.length});
+        }
+        const porForma = {};
+        cs.forEach(r=>{ const k=(r.forma||'Sin especificar'); porForma[k]=round2((porForma[k]||0)+r.importe); });
+        recuperacion = {
+          modo:'real', importe: recSem, cobros: cs.length,
+          anterior: recPrev, variacion_pct: recPrev>0 ? round2((recSem/recPrev-1)*100) : null,
+          ticket: round2(safeDiv(recSem, cs.length)),
+          por_dia: recDia,
+          por_forma: Object.entries(porForma).map(([forma,importe])=>({forma,importe})).sort((a,b)=>b.importe-a.importe),
+          cobros_con_fecha: cobConFecha.length, cobros_sin_fecha: cobrosArr.length-cobConFecha.length
+        };
+        if(recuperacion.cobros_sin_fecha>0)
+          W.push(`${recuperacion.cobros_sin_fecha} cobros del reporte no tienen fecha y se excluyeron de la Recuperación Semanal.`);
+      }else if(cobrosArr.length){
+        recuperacion = {
+          modo:'sin_fecha', importe: sumImp(cobrosArr), cobros: cobrosArr.length,
+          anterior:null, variacion_pct:null, ticket: round2(safeDiv(sumImp(cobrosArr), cobrosArr.length)),
+          por_dia:null, por_forma:null, cobros_con_fecha:0, cobros_sin_fecha:cobrosArr.length
+        };
+        W.push('El reporte de Cobros no incluye (o no se mapeó) la columna FECHA: la Recuperación Semanal muestra el total del cobro cargado, no el de la semana de corte. Mapea la columna Fecha para acotar por semana.');
+      }else{
+        recuperacion = { modo:'no_data', importe:null, cobros:0, anterior:null, variacion_pct:null,
+                         ticket:0, por_dia:null, por_forma:null, cobros_con_fecha:0, cobros_sin_fecha:0 };
+      }
+
       if(conFecha.length){
         const sem = conFecha.filter(r=>enRango(r.fecha, ini, finEf));
         const prev = conFecha.filter(r=>enRango(r.fecha, iniPrev, finPrev));
@@ -1005,6 +1082,7 @@
           variacion: vPrev>0 ? { ventas_pct: round2((vSem/vPrev-1)*100),
                                  facturas_pct: round2(safeDiv(sem.length, prev.length)*100-100) } : null,
           por_dia: porDia,
+          recuperacion,
           top_clientes_semana: Object.values(porCli).sort((a,b)=>b.venta-a.venta).slice(0,10),
           promedio_diario_periodo: promedioDia,
           participacion_pct: round2(safeDiv(vSem, netoPeriodo)*100),
@@ -1024,6 +1102,7 @@
                    margen_estimado: round2(vSem*margenPct/100),
                    unidades_estimadas: Math.round(safeDiv(ventas.unidades_vendidas, dias)*diasTrans) },
           anterior:null, variacion:null,
+          recuperacion,
           por_dia: (()=>{ const a=[]; for(let f=ini; f<=finEf; f=isoAdd(f,1))
                      a.push({fecha:f, dia:DIA[isoToDate(f).getDay()], ventas:promedioDia, facturas:Math.round(factDia)}); return a; })(),
           top_clientes_semana: null,
