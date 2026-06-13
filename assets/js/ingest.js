@@ -41,6 +41,34 @@
   const round2 = n => Math.round(n*100)/100;
   const safeDiv = (a,b) => (b && isFinite(a/b)) ? a/b : 0;
 
+  /* Normaliza cualquier formato de fecha del ERP a 'YYYY-MM-DD'.
+     Acepta: Date (cellDates), serial de Excel, dd/mm/yyyy, dd-mm-yyyy,
+     yyyy-mm-dd, dd/mm/yy. Devuelve null si no es interpretable. */
+  function toISODate(v){
+    if(v==null || v==='') return null;
+    const pad = n => String(n).padStart(2,'0');
+    if(v instanceof Date && !isNaN(v)) return v.getFullYear()+'-'+pad(v.getMonth()+1)+'-'+pad(v.getDate());
+    if(typeof v==='number' && isFinite(v) && v>20000 && v<80000){      // serial Excel
+      const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+      return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate());
+    }
+    const s = String(v).trim();
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);                    // yyyy-mm-dd
+    if(m) return m[1]+'-'+pad(+m[2])+'-'+pad(+m[3]);
+    m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);          // dd/mm/yyyy (convención MX)
+    if(m){
+      let dd=+m[1], mm=+m[2], yy=+m[3];
+      if(yy<100) yy += yy<70 ? 2000 : 1900;
+      if(mm>12 && dd<=12){ const t=dd; dd=mm; mm=t; }                   // tolera mm/dd/yyyy
+      if(mm>=1 && mm<=12 && dd>=1 && dd<=31) return yy+'-'+pad(mm)+'-'+pad(dd);
+    }
+    return null;
+  }
+  /* Aritmética de fechas ISO (sin zona horaria) */
+  const isoToDate = iso => new Date(iso+'T00:00:00');
+  const dateToISO = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const isoAdd = (iso,days) => { const d=isoToDate(iso); d.setDate(d.getDate()+days); return dateToISO(d); };
+
   /* ================= clasificación de línea ================= */
   function classifyLinea(desc){
     const d = strip(desc);
@@ -524,9 +552,11 @@
         let iva = map.tax!=null ? num(get(row,'tax')) : null;
         const total = map.total!=null ? num(get(row,'total')) : null;
         if(iva==null && total!=null) iva = round2(total-neto);
+        const fecha = map.fecha!=null ? toISODate(get(row,'fecha')) : null;
         out.push({folio, cliente:String(get(row,'client')??'').trim(),
                   neto:round2(neto), iva: iva!=null?round2(iva):null,
-                  total: total!=null?round2(total):round2(neto+(iva||0))});
+                  total: total!=null?round2(total):round2(neto+(iva||0)),
+                  fecha});
       }
     }
     if(!out.length && warnings) warnings.push(`El reporte "${T.nombre}" no produjo filas válidas — revisa el mapeo de columnas.`);
@@ -592,7 +622,11 @@
     }else if(type==='DRVETS'){
       // por FOLIO: acumular es idempotente (re-subir una semana no duplica facturas)
       if(!acum || !store.drvets) store.drvets = {};
-      records.forEach(r=>{ store.drvets[r.folio] = {cliente:r.cliente, neto:r.neto, iva:r.iva, total:r.total}; });
+      records.forEach(r=>{
+        const prev = store.drvets[r.folio];
+        store.drvets[r.folio] = {cliente:r.cliente, neto:r.neto, iva:r.iva, total:r.total,
+                                 fecha: r.fecha || (prev && prev.fecha) || null};
+      });
     }
   }
 
@@ -914,6 +948,96 @@
       W.push('No se cargó el reporte de cobranza: se conservó la cartera anterior.');
     }
 
+    /* ---------- SEMANAL (semana de corte: sábado → viernes) ----------
+       Regla: la "semana de corte" es la ventana sábado→viernes vigente al
+       corte de datos. Si el corte cae en sábado (semana recién iniciada),
+       la semana principal es la que CERRÓ el viernes anterior.
+       - modo 'real': si el Diario de Ventas trae columna Fecha, los KPIs
+         semanales y la serie diaria salen factura por factura.
+       - modo 'estimado': sin fechas, se prorratea el ritmo del periodo
+         (claramente etiquetado) hasta que se cargue el diario con fecha. */
+    let semanal = null;
+    if(meta.corte){
+      const DIA = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+      const dowCorte = isoToDate(meta.corte).getDay();           // 0=Dom..6=Sáb
+      // inicio (sábado) de la semana que contiene al corte
+      let ini = isoAdd(meta.corte, -((dowCorte - 6 + 7) % 7));
+      if(ini === meta.corte && meta.inicio && meta.corte > meta.inicio){
+        ini = isoAdd(ini, -7);                                   // corte en sábado → semana que cerró el viernes
+      }
+      const fin = isoAdd(ini, 6);                                // viernes
+      const finEf = fin <= meta.corte ? fin : meta.corte;        // fin efectivo (no pasar el corte)
+      const completa = fin <= meta.corte;
+      const diasTrans = Math.round((isoToDate(finEf)-isoToDate(ini))/86400000)+1;
+      const iniPrev = isoAdd(ini,-7), finPrev = isoAdd(ini,-1);
+
+      const conFecha = drvetsArr.filter(r=>r.fecha);
+      const margenPct = margen.margen_pct || 0;
+      const netoPeriodo = ventas.neto || 0;
+      const promedioDia = round2(safeDiv(netoPeriodo, dias));
+      const factDia = safeDiv(ventas.documentos, dias);
+
+      const enRango = (f,a,b)=> f>=a && f<=b;
+      if(conFecha.length){
+        const sem = conFecha.filter(r=>enRango(r.fecha, ini, finEf));
+        const prev = conFecha.filter(r=>enRango(r.fecha, iniPrev, finPrev));
+        const sum = arr => round2(arr.reduce((s,r)=>s+r.neto,0));
+        const vSem = sum(sem), vPrev = sum(prev);
+        const porDia = [];
+        for(let f=ini; f<=finEf; f=isoAdd(f,1)){
+          const del = sem.filter(r=>r.fecha===f);
+          porDia.push({fecha:f, dia:DIA[isoToDate(f).getDay()], ventas:sum(del), facturas:del.length});
+        }
+        const porCli = {};
+        sem.forEach(r=>{ const k=(r.cliente||'(Sin cliente)').toUpperCase();
+          if(!porCli[k]) porCli[k]={cliente:r.cliente||'(Sin cliente)', venta:0, facturas:0};
+          porCli[k].venta=round2(porCli[k].venta+r.neto); porCli[k].facturas++; });
+        semanal = {
+          modo:'real', regla:'Semana de corte: sábado a viernes', corte: meta.corte,
+          inicio: ini, fin, fin_efectivo: finEf, completa, dias_transcurridos: diasTrans,
+          actual:{ ventas:vSem, facturas:sem.length,
+                   ticket: round2(safeDiv(vSem, sem.length)),
+                   clientes: Object.keys(porCli).length,
+                   margen_estimado: round2(vSem*margenPct/100),
+                   unidades_estimadas: Math.round(safeDiv(ventas.unidades_vendidas*vSem, netoPeriodo)) },
+          anterior:{ inicio:iniPrev, fin:finPrev, ventas:vPrev, facturas:prev.length,
+                     ticket: round2(safeDiv(vPrev, prev.length)) },
+          variacion: vPrev>0 ? { ventas_pct: round2((vSem/vPrev-1)*100),
+                                 facturas_pct: round2(safeDiv(sem.length, prev.length)*100-100) } : null,
+          por_dia: porDia,
+          top_clientes_semana: Object.values(porCli).sort((a,b)=>b.venta-a.venta).slice(0,10),
+          promedio_diario_periodo: promedioDia,
+          participacion_pct: round2(safeDiv(vSem, netoPeriodo)*100),
+          facturas_con_fecha: conFecha.length, facturas_sin_fecha: drvetsArr.length-conFecha.length,
+          margen_pct_referencia: margenPct
+        };
+        if(semanal.facturas_sin_fecha>0)
+          W.push(`${semanal.facturas_sin_fecha} facturas del diario no tienen fecha y se excluyeron del Resumen Semanal.`);
+      }else{
+        const vSem = round2(promedioDia*diasTrans);
+        semanal = {
+          modo:'estimado', regla:'Semana de corte: sábado a viernes', corte: meta.corte,
+          inicio: ini, fin, fin_efectivo: finEf, completa, dias_transcurridos: diasTrans,
+          actual:{ ventas:vSem, facturas: Math.round(factDia*diasTrans),
+                   ticket: ventas.ticket_promedio,
+                   clientes: clientes.total||0,
+                   margen_estimado: round2(vSem*margenPct/100),
+                   unidades_estimadas: Math.round(safeDiv(ventas.unidades_vendidas, dias)*diasTrans) },
+          anterior:null, variacion:null,
+          por_dia: (()=>{ const a=[]; for(let f=ini; f<=finEf; f=isoAdd(f,1))
+                     a.push({fecha:f, dia:DIA[isoToDate(f).getDay()], ventas:promedioDia, facturas:Math.round(factDia)}); return a; })(),
+          top_clientes_semana: null,
+          promedio_diario_periodo: promedioDia,
+          participacion_pct: round2(safeDiv(vSem, netoPeriodo)*100),
+          facturas_con_fecha: 0, facturas_sin_fecha: drvetsArr.length,
+          margen_pct_referencia: margenPct
+        };
+        W.push('El Diario de Ventas no incluye (o no se mapeó) la columna FECHA: el Resumen Semanal se muestra como estimación proporcional. Carga el diario con fecha por factura para cifras diarias reales.');
+      }
+    }else{
+      semanal = B.semanal || null;
+    }
+
     /* ---------- RESUMEN + META ---------- */
     const resumen = {
       empresa: meta.empresa || 'HARVIN DISTRIBUCIONES',
@@ -930,7 +1054,7 @@
 
     const data = { ventas, inventario, margen, articulos, clientes, rotacion, inactivos,
                    cobranza, cliente_articulo, sugerencias_compra: sugerencias, promociones,
-                   resumen, abc,
+                   resumen, abc, semanal,
                    meta: { actualizado: new Date().toISOString(),
                            periodo: resumen.periodo,
                            corte: meta.corte || null,
@@ -942,7 +1066,7 @@
   function emptyMargen(){ return {ventas_con_costo:0,cogs:0,margen_bruto:0,margen_pct:0,skus_con_costeo:0,skus_sin_costeo:0,markup_pct:0,top_articulos_utilidad:[],peor_margen_pct:[],distribucion:{'<0%':0,'0-15%':0,'15-25%':0,'25-35%':0,'35-50%':0,'>50%':0},por_linea:[]}; }
   function emptyInventario(){ return {valor_total:0,skus_total:0,skus_con_existencia:0,skus_sin_existencia:0,turnover_real_anual:0,dias_inventario:0,capital_activo:0,capital_muerto:0,pct_muerto:0}; }
 
-  const API = { strip, num, classifyLinea, REPORT_TYPES, FIELD_SYNONYMS,
+  const API = { strip, num, classifyLinea, REPORT_TYPES, FIELD_SYNONYMS, toISODate,
                 parseFile, findHeaderRow, headerCells, autoMapColumns, detectType,
                 analyzeSheet, detectPeriod, normalizeRows, emptyStore, mergeIntoStore, buildHarvin };
   if(typeof module!=='undefined' && module.exports) module.exports = API;

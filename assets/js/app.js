@@ -30,7 +30,7 @@ const trunc = (s,n=46)=> !s?'':(s.length>n?s.slice(0,n)+'…':s);
 
 /* ---------- Paleta de gráficas ---------- */
 const C = {
-  amber:'#f6b042', amber2:'#ffce7a', teal:'#36d6c3', teal2:'#7af0e2',
+  amber:'#e23440', amber2:'#ff8a93', teal:'#36d6c3', teal2:'#7af0e2',
   violet:'#8b7cf6', rose:'#fb6f84', green:'#3ddc97', blue:'#5aa9ff',
   txt:'#9aa6bd', grid:'#1c2434', line:'#243047'
 };
@@ -63,6 +63,7 @@ function axisStyle(){return {
 /* ---------- Iconos (lucide-style inline) ---------- */
 const I = {
   home:'<path d="M3 12l9-9 9 9M5 10v10h14V10"/>',
+  cal:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 15h.01M12 15h.01M16 15h.01"/>',
   sales:'<path d="M3 3v18h18M7 15l4-4 3 3 5-6"/>',
   margin:'<path d="M12 2v20M5 7h9a3 3 0 010 6H7a3 3 0 000 6h10"/>',
   users:'<circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0112 0M16 5.5a3 3 0 010 5.6M21 20a5.5 5.5 0 00-4-5.3"/>',
@@ -92,6 +93,7 @@ const svg = (p)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 const NAV = [
   {sec:'Visión General'},
   {id:'resumen', name:'Resumen Ejecutivo', ico:I.home},
+  {id:'semanal', name:'Resumen Semanal', ico:I.cal},
   {id:'ventas', name:'Ventas & Facturación', ico:I.sales},
   {id:'margen', name:'Margen & Rentabilidad', ico:I.margin},
   {sec:'Comercial'},
@@ -144,7 +146,7 @@ VIEWS.resumen = ()=>{
   </div>
 
   <div class="grid g-4" style="margin-top:14px">
-    ${kpi({lbl:'Ventas Netas',val:fCompact(r.ventas_netas),sub:`${fNum(r.facturas)} facturas · ticket ${fMX(r.ticket_promedio)}`,ico:I.sales,cls:'feat',glow:'rgba(246,176,66,.22)'})}
+    ${kpi({lbl:'Ventas Netas',val:fCompact(r.ventas_netas),sub:`${fNum(r.facturas)} facturas · ticket ${fMX(r.ticket_promedio)}`,ico:I.sales,cls:'feat',glow:'rgba(226,52,64,.22)'})}
     ${kpi({lbl:'Margen Bruto',val:fCompact(r.margen_bruto),sub:`<span class="chg up">${fPct(r.margen_pct)}</span> sobre ventas`,ico:I.margin,glow:'rgba(54,214,195,.18)'})}
     ${kpi({lbl:'Valor Inventario',val:fCompact(r.inventario_valor),sub:`${fNum(inv.dias_inventario)} días · ${fNum(inv.turnover_real_anual,2)}x rotación real`,ico:I.box,glow:'rgba(139,124,246,.16)'})}
     ${kpi({lbl:'Cartera por Cobrar',val:fCompact(r.cartera),sub:`DSO ${fNum(r.dso,1)} días · ${fNum(cob.clientes_con_saldo)} clientes`,ico:I.cash,cls:'',glow:'rgba(61,220,151,.16)'})}
@@ -223,13 +225,153 @@ VIEWS.resumen = ()=>{
   return {html,init};
 };
 
+/* ---------- 1b. RESUMEN SEMANAL (corte sábado → viernes) ---------- */
+function semanalData(){
+  if(D.semanal && D.semanal.inicio) return D.semanal;
+  /* Respaldo en cliente: si los datos publicados aún no traen el bloque
+     semanal, se calcula aquí una estimación proporcional con el resumen. */
+  const meta = D.meta||{}, r = D.resumen||{}, v = D.ventas||{};
+  if(!meta.corte) return null;
+  const toD = iso=>new Date(iso+'T00:00:00');
+  const toI = d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const add = (iso,n)=>{const d=toD(iso); d.setDate(d.getDate()+n); return toI(d);};
+  const DIA=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const dow = toD(meta.corte).getDay();
+  let ini = add(meta.corte, -((dow-6+7)%7));
+  if(ini===meta.corte) ini = add(ini,-7);   // corte en sábado → semana que cerró el viernes anterior
+  const fin = add(ini,6);
+  const finEf = fin<=meta.corte?fin:meta.corte;
+  const dias = Math.max(1, meta.dias||1);
+  const dt = Math.round((toD(finEf)-toD(ini))/86400000)+1;
+  const pd = (r.ventas_netas||0)/dias, fd=(r.facturas||0)/dias;
+  const vSem = Math.round(pd*dt*100)/100;
+  const porDia=[]; for(let f=ini; f<=finEf; f=add(f,1)) porDia.push({fecha:f, dia:DIA[toD(f).getDay()], ventas:Math.round(pd*100)/100, facturas:Math.round(fd)});
+  return { modo:'estimado', regla:'Semana de corte: sábado a viernes', corte:meta.corte,
+    inicio:ini, fin, fin_efectivo:finEf, completa: fin<=meta.corte, dias_transcurridos:dt,
+    actual:{ ventas:vSem, facturas:Math.round(fd*dt), ticket:r.ticket_promedio||0, clientes:r.clientes_activos||0,
+             margen_estimado: Math.round(vSem*(r.margen_pct||0))/100, unidades_estimadas: Math.round((r.unidades_vendidas||0)/dias*dt) },
+    anterior:null, variacion:null, por_dia:porDia, top_clientes_semana:null,
+    promedio_diario_periodo: Math.round(pd*100)/100,
+    participacion_pct: Math.round((vSem/(r.ventas_netas||1))*10000)/100,
+    facturas_con_fecha:0, facturas_sin_fecha:(v.documentos||0), margen_pct_referencia:r.margen_pct||0 };
+}
+const fFecha = iso=>{ if(!iso) return '—'; const MES=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']; const d=new Date(iso+'T00:00:00'); return String(d.getDate()).padStart(2,'0')+' '+MES[d.getMonth()]; };
+const fFechaL = iso=>{ if(!iso) return '—'; return fFecha(iso)+' '+iso.slice(0,4); };
+
+VIEWS.semanal = ()=>{
+  const S = semanalData();
+  if(!S){
+    return {html: sHead('Resumen Semanal','No hay fecha de corte en los datos publicados. Carga reportes en "Actualizar Datos" indicando el periodo.')};
+  }
+  const A = S.actual, est = S.modo==='estimado';
+  const estTag = est ? `<span class="tag red">Estimación</span>` : `<span class="tag teal">Cifras reales</span>`;
+  const estadoSem = S.completa ? 'Semana cerrada' : `Semana en curso · día ${S.dias_transcurridos} de 7`;
+  const banner = est ? insight('crit',I.alert,'Modo estimación proporcional',
+      'El Diario de Ventas cargado no incluye la columna <b>FECHA</b> por factura, por lo que esta semana se estima con el ritmo promedio del periodo ('+fMX(S.promedio_diario_periodo)+'/día). En cuanto cargues el diario con fecha en <b>Actualizar Datos</b>, este tablero mostrará automáticamente las cifras diarias reales, la comparación contra la semana anterior y los clientes de la semana.') : '';
+
+  const compCard = S.anterior ? `
+    <div class="card pad-lg">
+      <div class="card-h"><span class="t">Semana actual vs. semana anterior</span><span class="tag amber">WoW</span></div>
+      <div id="c_sem_wow" class="chart h-md"></div>
+      <div class="note">Semana anterior: ${fFechaL(S.anterior.inicio)} — ${fFechaL(S.anterior.fin)} · ${fNum(S.anterior.facturas)} facturas · ${fCompact(S.anterior.ventas)}.</div>
+    </div>` : `
+    <div class="card pad-lg">
+      <div class="card-h"><span class="t">Peso de la semana en el periodo</span><span class="tag amber">${fPct(S.participacion_pct)}</span></div>
+      <div id="c_sem_part" class="chart h-md"></div>
+      <div class="note">Una semana tipo equivale al <b>${fPct(S.participacion_pct)}</b> de la venta acumulada del periodo (${fCompact(D.resumen.ventas_netas)}).</div>
+    </div>`;
+
+  const topCli = (S.top_clientes_semana && S.top_clientes_semana.length) ? `
+    ${sHead('Clientes de la semana','Cuentas que facturaron dentro de la semana de corte.')}
+    <div class="card">
+      <div class="card-h"><span class="t">Top clientes · ${fFechaL(S.inicio)} — ${fFechaL(S.fin_efectivo)}</span><span class="tag teal">${fNum(A.clientes)} clientes</span></div>
+      <div class="t-wrap"><table class="tbl"><thead><tr><th>#</th><th>Cliente</th><th>Facturas</th><th style="text-align:right">Venta</th></tr></thead><tbody>
+      ${S.top_clientes_semana.map((c,i)=>`<tr><td><span class="t-rank ${i<3?'top':''}">${i+1}</span></td><td>${trunc(c.cliente,52)}</td><td>${fNum(c.facturas)}</td><td style="text-align:right;font-family:var(--mono)">${fMX(c.venta)}</td></tr>`).join('')}
+      </tbody></table></div>
+    </div>` : '';
+
+  const html = `
+  <div class="cover">
+    <div class="eyebrow">Semana de corte · sábado a viernes</div>
+    <h2>Resumen semanal <em>${fFechaL(S.inicio)} — ${fFechaL(S.fin)}</em></h2>
+    <p>Evaluación de la semana de corte vigente. Este módulo se recalcula automáticamente con cada actualización de reportes: siempre muestra la semana sábado→viernes correspondiente al corte de datos vigente.</p>
+    <div class="period">${svg(I.cal)} ${estadoSem} · corte de datos: ${fFechaL(S.corte)} ${estTag}</div>
+  </div>
+  ${banner ? `<div style="margin-top:14px">${banner}</div>` : ''}
+
+  <div class="grid g-4" style="margin-top:14px">
+    ${kpi({lbl:'Ventas de la Semana',val:fCompact(A.ventas),sub:`${fNum(A.facturas)} facturas en ${fNum(S.dias_transcurridos)} días`,ico:I.sales,cls:'feat',glow:'rgba(226,52,64,.25)'})}
+    ${kpi({lbl:'Ticket Promedio',val:fMX(A.ticket),sub: est?'referencia del periodo':'de las facturas de la semana',ico:I.doc,glow:'rgba(54,214,195,.16)'})}
+    ${kpi({lbl:'Margen Bruto Semanal',val:fCompact(A.margen_estimado),sub:`estimado al ${fPct(S.margen_pct_referencia)} del periodo`,ico:I.margin,glow:'rgba(139,124,246,.16)'})}
+    ${kpi({lbl:'Participación del Periodo',val:fPct(S.participacion_pct),sub:`de ${fCompact(D.resumen.ventas_netas)} acumulados`,ico:I.trend,glow:'rgba(61,220,151,.16)'})}
+  </div>
+  <div class="grid g-4" style="margin-top:16px">
+    ${kpi({lbl:'Facturas Emitidas',val:fNum(A.facturas),sub:`${fNum(A.facturas/Math.max(1,S.dias_transcurridos),1)} por día`,ico:I.doc})}
+    ${kpi({lbl:'Unidades (est.)',val:fNum(A.unidades_estimadas),unit:'pzas',sub:'proporcional al ritmo de venta',ico:I.pkg})}
+    ${kpi({lbl:'Clientes Atendidos',val:fNum(A.clientes),sub: est?'activos en el periodo (ref.)':'con factura en la semana',ico:I.users})}
+    ${kpi({lbl:'Promedio Diario',val:fCompact(A.ventas/Math.max(1,S.dias_transcurridos)),sub:`periodo: ${fCompact(S.promedio_diario_periodo)}/día`,ico:I.spark})}
+  </div>
+
+  ${sHead('Comportamiento diario de la semana','Venta por día de la semana de corte (sábado a viernes).' + (est?' En modo estimación se muestra el promedio diario del periodo.':''))}
+  <div class="grid g-2">
+    <div class="card pad-lg">
+      <div class="card-h"><span class="t">Venta por día · ${fFechaL(S.inicio)} — ${fFechaL(S.fin_efectivo)}</span>${estTag}</div>
+      <div id="c_sem_dias" class="chart h-md"></div>
+      ${est?`<div class="note">Barras al promedio diario del periodo (${fCompact(S.promedio_diario_periodo)}). Con el diario fechado verás aquí la venta real de cada día.</div>`:''}
+    </div>
+    ${compCard}
+  </div>
+  ${topCli}
+
+  ${sHead('Lectura de la semana','Síntesis para la dirección.')}
+  <div style="display:flex;flex-direction:column;gap:12px">
+    ${S.variacion ? insight(S.variacion.ventas_pct>=0?'good':'crit', I.trend,
+        'Venta '+(S.variacion.ventas_pct>=0?'creció ':'cayó ')+fPct(Math.abs(S.variacion.ventas_pct))+' vs. semana anterior',
+        'La semana registró '+fMX(A.ventas)+' contra '+fMX(S.anterior.ventas)+' de la semana previa ('+fNum(A.facturas)+' vs '+fNum(S.anterior.facturas)+' facturas).')
+      : insight('',I.trend,'Ritmo de la semana tipo','Al ritmo del periodo, una semana completa de corte genera ~'+fMX(A.ventas)+' con ~'+fNum(A.facturas)+' facturas y un margen bruto estimado de '+fMX(A.margen_estimado)+'.')}
+    ${insight('good',I.check,'Actualización continua','Este módulo se alimenta de los mismos reportes del ERP: al publicar nuevos datos, la semana de corte avanza sola y todos los KPIs (resumen, ventas, margen, inventario, cobranza) se recalculan en cadena.')}
+  </div>`;
+
+  const init = ()=>{
+    mk('c_sem_dias',{
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'},formatter:p=>{const d=S.por_dia[p[0].dataIndex];return `<b>${d.dia} ${fFecha(d.fecha)}</b><br>Venta: ${fMX(d.ventas)}<br>Facturas: ${fNum(d.facturas)}`;}},
+      xAxis:{type:'category',data:S.por_dia.map(d=>d.dia+'\n'+fFecha(d.fecha)),...axisStyle(),axisLabel:{color:C.txt,fontSize:10.5,lineHeight:14}},
+      yAxis:{type:'value',...axisStyle(),axisLabel:{color:C.txt,fontSize:11,formatter:v=>fCompact(v)}},
+      series:[{type:'bar',barWidth:'56%',
+        itemStyle:{borderRadius:[7,7,0,0],color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:C.amber2},{offset:1,color:C.amber}]),opacity:est?.55:1},
+        data:S.por_dia.map(d=>d.ventas),
+        markLine: est?{symbol:'none',lineStyle:{color:C.teal,type:'dashed'},label:{color:C.teal,formatter:'promedio'},data:[{yAxis:S.promedio_diario_periodo}]}:undefined}]
+    });
+    if(S.anterior){
+      mk('c_sem_wow',{
+        tooltip:{trigger:'axis',axisPointer:{type:'shadow'},valueFormatter:v=>fMX(v)},
+        xAxis:{type:'category',data:['Semana anterior','Semana actual'],...axisStyle()},
+        yAxis:{type:'value',...axisStyle(),axisLabel:{formatter:v=>fCompact(v)}},
+        series:[{type:'bar',barWidth:'42%',itemStyle:{borderRadius:[8,8,0,0]},
+          data:[{value:S.anterior.ventas,itemStyle:{color:'#5f6c84'}},{value:A.ventas,itemStyle:{color:C.amber}}],
+          label:{show:true,position:'top',color:C.amber2,fontFamily:'IBM Plex Mono',fontSize:11,formatter:p=>fCompact(p.value)}}]
+      });
+    }else{
+      mk('c_sem_part',{
+        tooltip:{trigger:'item',valueFormatter:v=>fMX(v)},
+        series:[{type:'pie',radius:['58%','80%'],center:['50%','50%'],
+          label:{show:true,position:'center',formatter:fPct(S.participacion_pct)+'\nsemana tipo',color:'#e8edf6',fontSize:15,fontFamily:'Sora',fontWeight:700,lineHeight:22},
+          labelLine:{show:false},
+          data:[{value:A.ventas,name:'Semana de corte',itemStyle:{color:C.amber}},
+                {value:Math.max(0,(D.resumen.ventas_netas||0)-A.ventas),name:'Resto del periodo',itemStyle:{color:'#243047'}}]}]
+      });
+    }
+  };
+  return {html, init};
+};
+
 /* ---------- 2. VENTAS & FACTURACIÓN ---------- */
 VIEWS.ventas = ()=>{
   const v=D.ventas, abc=D.abc;
   const html=`
   ${sHead('Indicadores de venta','Volumen facturado en el periodo y eficiencia comercial.')}
   <div class="grid g-4">
-    ${kpi({lbl:'Venta Neta',val:fCompact(v.neto),sub:'antes de IVA',ico:I.sales,cls:'feat',glow:'rgba(246,176,66,.2)'})}
+    ${kpi({lbl:'Venta Neta',val:fCompact(v.neto),sub:'antes de IVA',ico:I.sales,cls:'feat',glow:'rgba(226,52,64,.2)'})}
     ${kpi({lbl:'Venta Total c/IVA',val:fCompact(v.total),sub:`IVA ${fCompact(v.iva)}`,ico:I.cash})}
     ${kpi({lbl:'Documentos',val:fNum(v.documentos),unit:'facturas',sub:'normales',ico:I.doc})}
     ${kpi({lbl:'Ticket Promedio',val:fMX(v.ticket_promedio),sub:'venta neta / factura',ico:I.trend})}
@@ -249,7 +391,7 @@ VIEWS.ventas = ()=>{
     </div>
     <div class="card">
       <div class="card-h"><span class="t">Segmentos</span></div>
-      <div class="prow"><span class="nm"><span class="chip a">A</span> Críticos</span><div class="track"><i style="width:${abc.A.venta/v.neto*100}%;background:linear-gradient(90deg,#f6b042,#ffce7a)"></i></div><span class="vv">${fCompact(abc.A.venta)}</span></div>
+      <div class="prow"><span class="nm"><span class="chip a">A</span> Críticos</span><div class="track"><i style="width:${abc.A.venta/v.neto*100}%;background:linear-gradient(90deg,#e23440,#ff8a93)"></i></div><span class="vv">${fCompact(abc.A.venta)}</span></div>
       <div class="prow"><span class="nm"><span class="chip t">B</span> Importantes</span><div class="track"><i style="width:${abc.B.venta/v.neto*100}%;background:linear-gradient(90deg,#36d6c3,#7af0e2)"></i></div><span class="vv">${fCompact(abc.B.venta)}</span></div>
       <div class="prow"><span class="nm"><span class="chip r">C</span> Marginales</span><div class="track"><i style="width:${abc.C.venta/v.neto*100}%;background:linear-gradient(90deg,#8b7cf6,#b3a8fb)"></i></div><span class="vv">${fCompact(abc.C.venta)}</span></div>
       <div class="note" style="margin-top:14px">Los <b style="color:var(--amber-2)">${fNum(abc.A.skus)} artículos "A"</b> (${fPct(abc.A.pct_skus)} del catálogo vendido) concentran el 80% de la venta. Foco de disponibilidad, precio y compra.</div>
@@ -297,7 +439,7 @@ VIEWS.margen = ()=>{
   const html=`
   ${sHead('Rentabilidad consolidada','Margen bruto calculado artículo por artículo usando el último costo de compra (valuación EXIVAL).')}
   <div class="grid g-4">
-    ${kpi({lbl:'Ventas Costeadas',val:fCompact(m.ventas_con_costo),sub:`${fNum(m.skus_con_costeo)} SKUs costeados`,ico:I.sales,cls:'feat',glow:'rgba(246,176,66,.2)'})}
+    ${kpi({lbl:'Ventas Costeadas',val:fCompact(m.ventas_con_costo),sub:`${fNum(m.skus_con_costeo)} SKUs costeados`,ico:I.sales,cls:'feat',glow:'rgba(226,52,64,.2)'})}
     ${kpi({lbl:'Costo de Mercancía',val:fCompact(m.cogs),sub:'COGS del periodo',ico:I.box,glow:'rgba(251,111,132,.16)'})}
     ${kpi({lbl:'Margen Bruto',val:fCompact(m.margen_bruto),sub:`utilidad bruta total`,ico:I.margin,glow:'rgba(54,214,195,.2)'})}
     ${kpi({lbl:'Margen %',val:fPct(m.margen_pct),sub:`markup ${fPct(m.markup_pct)} s/costo`,ico:I.trend,glow:'rgba(61,220,151,.16)'})}
@@ -359,7 +501,7 @@ VIEWS.clientes = ()=>{
   const html=`
   ${sHead('Cartera de clientes','Concentración de ventas y desempeño de las cuentas en el periodo.')}
   <div class="grid g-4">
-    ${kpi({lbl:'Clientes Activos',val:fNum(cl.total),sub:'con venta en el periodo',ico:I.users,cls:'feat',glow:'rgba(246,176,66,.2)'})}
+    ${kpi({lbl:'Clientes Activos',val:fNum(cl.total),sub:'con venta en el periodo',ico:I.users,cls:'feat',glow:'rgba(226,52,64,.2)'})}
     ${kpi({lbl:'Venta Promedio',val:fMX(cl.ticket_promedio_cliente),sub:'por cliente',ico:I.trend})}
     ${kpi({lbl:'Concentración 80%',val:fNum(cl.pareto_clientes_80pct),unit:'clientes',sub:`${fPct(cl.pareto_pct_clientes)} de la base`,ico:I.star,cls:'',glow:'rgba(251,111,132,.14)'})}
     ${kpi({lbl:'Cliente #1',val:fCompact(top[0].venta),sub:trunc(top[0].name,22),ico:I.spark,glow:'rgba(54,214,195,.16)'})}
@@ -419,7 +561,7 @@ VIEWS.articulos = ()=>{
   const html=`
   ${sHead('Desempeño de artículos','Productos de mayor desplazamiento por valor y por volumen.')}
   <div class="grid g-4">
-    ${kpi({lbl:'SKUs con Venta',val:fNum(a.total_skus_vendidos),sub:'referencias movidas',ico:I.box,cls:'feat',glow:'rgba(246,176,66,.2)'})}
+    ${kpi({lbl:'SKUs con Venta',val:fNum(a.total_skus_vendidos),sub:'referencias movidas',ico:I.box,cls:'feat',glow:'rgba(226,52,64,.2)'})}
     ${kpi({lbl:'Artículo Top Venta',val:fCompact(a.top_venta[0].venta),sub:a.top_venta[0].code,ico:I.star,glow:'rgba(54,214,195,.16)'})}
     ${kpi({lbl:'Artículo Top Unidades',val:fNum(a.top_unidades[0].u),unit:'pzas',sub:a.top_unidades[0].code,ico:I.pkg,glow:'rgba(139,124,246,.14)'})}
     ${kpi({lbl:'Segmento A',val:fNum(abc.A.skus),unit:'SKUs',sub:`generan el 80% de venta`,ico:I.trend,glow:'rgba(61,220,151,.16)'})}
@@ -465,7 +607,7 @@ VIEWS.lineas = ()=>{
   const html=`
   ${sHead('Análisis por línea de producto','Familias de producto clasificadas por su aporte de venta, margen y volumen.')}
   <div class="grid g-3">
-    ${lm.slice(0,3).map((l,i)=>kpi({lbl:l.linea,val:fCompact(l.venta),sub:`margen ${fPct(l.margen_pct)} · ${fNum(l.skus)} SKUs`,ico:[I.layers,I.box,I.pkg][i],cls:i===0?'feat':'',glow:i===0?'rgba(246,176,66,.2)':'rgba(54,214,195,.14)'})).join('')}
+    ${lm.slice(0,3).map((l,i)=>kpi({lbl:l.linea,val:fCompact(l.venta),sub:`margen ${fPct(l.margen_pct)} · ${fNum(l.skus)} SKUs`,ico:[I.layers,I.box,I.pkg][i],cls:i===0?'feat':'',glow:i===0?'rgba(226,52,64,.2)':'rgba(54,214,195,.14)'})).join('')}
   </div>
 
   ${sHead('Venta y utilidad por familia','Composición del portafolio: dónde está el volumen y dónde el margen.')}
@@ -526,7 +668,7 @@ VIEWS.crosssell = ()=>{
   const html=`
   ${sHead('Inteligencia de venta cruzada','Análisis de qué líneas compra cada cliente para diseñar planes de potenciación dirigidos.')}
   <div class="grid g-4">
-    ${kpi({lbl:'Clientes Analizados',val:fNum(ca.clientes_analizados),sub:'con detalle de artículos',ico:I.grid,cls:'feat',glow:'rgba(246,176,66,.2)'})}
+    ${kpi({lbl:'Clientes Analizados',val:fNum(ca.clientes_analizados),sub:'con detalle de artículos',ico:I.grid,cls:'feat',glow:'rgba(226,52,64,.2)'})}
     ${kpi({lbl:'Líneas de Producto',val:fNum(Object.keys(lineas).length),sub:'familias comercializadas',ico:I.layers,glow:'rgba(54,214,195,.16)'})}
     ${kpi({lbl:'Potencial Alto',val:fNum(pot.filter(p=>p.potencial==='Alto').length),unit:'cuentas',sub:'alto volumen, pocas líneas',ico:I.trend,glow:'rgba(61,220,151,.16)'})}
     ${kpi({lbl:'Línea Líder',val:trunc(Object.keys(lineas)[0],14),sub:fCompact(Object.values(lineas)[0]),ico:I.star,glow:'rgba(139,124,246,.14)'})}
@@ -580,7 +722,7 @@ VIEWS.inventario = ()=>{
   const html=`
   ${sHead('Valuación del inventario','Existencias al corte valuadas a último costo de compra (EXIVAL al 23/may/2026).')}
   <div class="grid g-4">
-    ${kpi({lbl:'Valor del Inventario',val:fCompact(inv.valor_total),sub:'valuado a último costo',ico:I.box,cls:'feat',glow:'rgba(246,176,66,.2)'})}
+    ${kpi({lbl:'Valor del Inventario',val:fCompact(inv.valor_total),sub:'valuado a último costo',ico:I.box,cls:'feat',glow:'rgba(226,52,64,.2)'})}
     ${kpi({lbl:'SKUs en Catálogo',val:fNum(inv.skus_total),sub:`${fNum(inv.skus_con_existencia)} con existencia`,ico:I.layers})}
     ${kpi({lbl:'Rotación Real',val:fNum(inv.turnover_real_anual,2),unit:'x/año',sub:`${fNum(inv.dias_inventario)} días de inventario`,ico:I.rotate,glow:'rgba(139,124,246,.16)'})}
     ${kpi({lbl:'Capital Inmovilizado',val:fCompact(inv.capital_muerto),sub:`<span class="chg down">${fPct(inv.pct_muerto)}</span> del valor total`,ico:I.ghost,cls:'alert'})}
@@ -633,7 +775,7 @@ VIEWS.rotacion = ()=>{
   const html=`
   ${sHead('Rotación de inventario','Velocidad de desplazamiento por artículo (salidas / inventario promedio). Base para compra inteligente.')}
   <div class="grid g-4">
-    ${kpi({lbl:'Rotación Global',val:fNum(ro.rotacion_global,1),unit:'x',sub:'sistema (salidas/inv. prom.)',ico:I.rotate,cls:'feat',glow:'rgba(246,176,66,.2)'})}
+    ${kpi({lbl:'Rotación Global',val:fNum(ro.rotacion_global,1),unit:'x',sub:'sistema (salidas/inv. prom.)',ico:I.rotate,cls:'feat',glow:'rgba(226,52,64,.2)'})}
     ${kpi({lbl:'Ítems con Rotación',val:fNum(ro.con_rotacion_count),sub:`de ${fNum(ro.total_items)} medidos`,ico:I.trend,glow:'rgba(61,220,151,.16)'})}
     ${kpi({lbl:'Ítems sin Rotación',val:fNum(ro.sin_rotacion_count),sub:`${fPct(ro.sin_rotacion_count/ro.total_items*100)} del catálogo`,ico:I.ghost,cls:'alert'})}
     ${kpi({lbl:'Salidas Totales',val:fNum(ro.salidas_total),sub:'movimientos del periodo',ico:I.pkg,glow:'rgba(54,214,195,.16)'})}
@@ -761,7 +903,7 @@ VIEWS.compras = ()=>{
   const html=`
   ${sHead('Sugerencias de Compra al Proveedor','Propuesta de reabastecimiento para el proveedor único, priorizada por demanda y cobertura. '+s.criterio+'.')}
   <div class="grid g-4">
-    ${kpi({lbl:'Artículos a Reabastecer',val:fNum(s.items_a_reabastecer),sub:'con cobertura menor a 30 días',ico:I.cart,cls:'feat',glow:'rgba(246,176,66,.2)'})}
+    ${kpi({lbl:'Artículos a Reabastecer',val:fNum(s.items_a_reabastecer),sub:'con cobertura menor a 30 días',ico:I.cart,cls:'feat',glow:'rgba(226,52,64,.2)'})}
     ${kpi({lbl:'Inversión Estimada',val:fCompact(s.inversion_estimada),sub:'a último costo de compra',ico:I.pkg,glow:'rgba(54,214,195,.16)'})}
     ${kpi({lbl:'Quiebres de Stock',val:fNum(sinStock),sub:'top 40 ya en existencia cero',ico:I.alert,cls:'alert'})}
     ${kpi({lbl:'Orden Sugerida (Top 40)',val:fCompact(top.reduce((a,x)=>a+(x.inversion||0),0)),sub:'prioridad inmediata de pedido',ico:I.trend})}
@@ -899,7 +1041,7 @@ VIEWS.cobranza = ()=>{
     ${kpi({lbl:'Cartera por Cobrar',val:fCompact(c.cartera_total),sub:`${fNum(c.facturas_pendientes)} facturas · ${fNum(c.clientes_con_saldo)} clientes`,ico:I.cash,cls:'feat',glow:'rgba(61,220,151,.18)'})}
     ${kpi({lbl:'Días Cartera (DSO)',val:fNum(c.dso_dias,1),unit:'días',sub:'rotación de cuentas por cobrar',ico:I.rotate,glow:'rgba(54,214,195,.16)'})}
     ${kpi({lbl:'Atraso Promedio',val:fNum(c.atraso_promedio,1),unit:'días',sub:'sobre fecha de vencimiento',ico:I.spark})}
-    ${kpi({lbl:'Saldo > 15 días',val:fCompact(vencido),sub:`${fPct(vencido/c.cartera_total*100)} de la cartera total`,ico:I.alert,cls:vencido>0?'':'',glow:'rgba(246,176,66,.16)'})}
+    ${kpi({lbl:'Saldo > 15 días',val:fCompact(vencido),sub:`${fPct(vencido/c.cartera_total*100)} de la cartera total`,ico:I.alert,cls:vencido>0?'':'',glow:'rgba(226,52,64,.16)'})}
   </div>
 
   <div class="grid g-2-1" style="margin-top:16px">

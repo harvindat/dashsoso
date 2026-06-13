@@ -18,8 +18,7 @@ function showLoginGate(onSuccess){
   div.id = 'login-gate';
   div.innerHTML = `
   <div class="login-card">
-    <div class="login-logo">H</div>
-    <h2>Harvin Distribuciones</h2>
+    <img src="assets/img/logo.jpg" alt="Harvin Distribuciones" class="login-brandimg">
     <p class="login-sub">Centro de Inteligencia Directiva · Acceso restringido</p>
     <form id="login-form" autocomplete="off">
       <label>Usuario</label>
