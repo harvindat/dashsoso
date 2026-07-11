@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "actualizado": "2026-06-12T23:12:18.571Z",
+  "actualizado": "2026-07-11T17:20:47.086Z",
   "users": [
     {
       "user": "dani",
@@ -13,12 +13,12 @@
     },
     {
       "user": "cindy",
-      "salt": "53ba22e8aef37b57cd9f275f",
-      "hash": "eec2c1b178805766603a904bed2208db1733b051448f39a64829384b1bcd1a6d",
+      "salt": "b9a01eb67a75e9b036c4a55c",
+      "hash": "319a20057da6a177adce7f9a373549ae3a4a194b206195492479377a41f658ca",
       "role": "viewer",
       "activo": true,
       "creado_por": "b3t0",
-      "creado": "2026-06-11T22:55:41.790Z"
+      "creado": "2026-07-11T17:20:44.779Z"
     },
     {
       "user": "SOSO",
