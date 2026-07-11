@@ -97,7 +97,7 @@ VIEWS.actualizar = ()=>{
     <div id="dropzone" class="dropzone">
       <div class="dz-ico">${svg(I.upload)}</div>
       <div><b>Arrastra aquí los reportes</b> o <span class="dz-link">haz clic para elegirlos</span></div>
-      <div class="dz-sub">Ventas por artículo · Ventas por cliente · Cliente×Artículo · Existencia y valor · Inactivos · Rotación · Cobranza</div>
+      <div class="dz-sub">Ventas por artículo · Ventas por cliente · Cliente×Artículo · Existencia y valor · Inactivos · Rotación · Cobranza · Diario de ventas · Diario de compras · Cobros · Pedidos</div>
       <input type="file" id="file-input" multiple accept=".xlsx,.xls,.csv" style="display:none">
     </div>
     <div id="file-list" class="file-list"></div>
@@ -280,7 +280,9 @@ function fieldLabel(f){
   return ({code:'Código artículo',desc:'Descripción',units:'Unidades',amount:'Importe/Venta',stock:'Existencia',
     cost:'Costo unitario',value:'Valor inventario',client:'Cliente',clientCode:'Clave cliente',balance:'Saldo',
     days:'Días/antigüedad',invoices:'Facturas',outflow:'Salidas',avgInv:'Inv. promedio',turnover:'Rotación',
-    lastSale:'Última venta'})[f]||f;
+    lastSale:'Última venta',fecha:'Fecha',cobro:'Importe cobrado',recibo:'Recibo/Referencia',forma:'Forma de cobro',
+    folio:'Folio',tax:'Impuesto/IVA',total:'Total',proveedor:'Proveedor',estatus:'Estatus',entrega:'Fecha de entrega',
+    cancelado:'Cancelado'})[f]||f;
 }
 
 /* ---------- procesamiento ---------- */
@@ -348,7 +350,7 @@ async function processAll(){
     store.meta.actualizado = new Date().toISOString();
 
     // EXIVAL primero: las descripciones/costos sirven a los demás
-    const order = ['EXIVAL','INACTIVOS','VENTAS_ART','VENTAS_CLI','CLI_ART','ROTACION','COBRANZA','COBROS','DRVETS'];
+    const order = ['EXIVAL','INACTIVOS','VENTAS_ART','VENTAS_CLI','CLI_ART','ROTACION','COBRANZA','COBROS','DRVETS','COMPRAS','PEDIDOS'];
     const byType = {};
     ready.forEach(f=>{ (byType[f.type]=byType[f.type]||[]).push(f); });
     const dup = Object.entries(byType).filter(([,v])=>v.length>1).map(([k])=>HINGEST.REPORT_TYPES[k].nombre);
@@ -407,6 +409,9 @@ function renderPreview(){
       ${row('Unidades vendidas', P.unidades_vendidas, N.unidades_vendidas, v=>fNum(v))}
       ${row('Facturas', P.facturas, N.facturas, v=>fNum(v))}
       ${row('IVA del periodo', (prev.ventas||{}).iva, (nu.ventas||{}).iva)}
+      ${row('Compras del periodo', P.compras_periodo, N.compras_periodo)}
+      ${row('Pedidos pendientes', P.pedidos_pendientes, N.pedidos_pendientes, v=>fNum(v))}
+      ${row('Backlog sin surtir', P.pedidos_backlog, N.pedidos_backlog)}
     </tbody></table></div>
     <div class="note">El número de facturas y el IVA se tomaron del reporte <b>Diarios de ventas</b>; las fechas, de los títulos de los reportes.</div>
     <div class="prev-meta">Nuevo periodo: <b>${escA(N.periodo||'')}</b></div>

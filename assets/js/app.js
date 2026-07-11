@@ -85,7 +85,9 @@ const I = {
   upload:'<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
   key:'<path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.78 7.78 5.5 5.5 0 017.78-7.78zm0 0L15.5 7.5m3 3L21 8m-3-3l3 3"/>',
   out:'<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>',
-  shield:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'
+  shield:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  truck:'<path d="M1 3h15v13H1zM16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>',
+  clip:'<path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 12l2 2 4-4"/>'
 };
 const svg = (p)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 
@@ -101,10 +103,12 @@ const NAV = [
   {id:'articulos', name:'Artículos & ABC', ico:I.star},
   {id:'lineas', name:'Líneas de Producto', ico:I.layers},
   {id:'crosssell', name:'Cliente × Artículo', ico:I.grid},
+  {id:'pedidos', name:'Pedidos & Surtido', ico:I.clip},
   {sec:'Operación'},
   {id:'inventario', name:'Inventario & Valuación', ico:I.box},
   {id:'rotacion', name:'Rotación de Inventario', ico:I.rotate},
   {id:'inactivos', name:'Capital Inmovilizado', ico:I.ghost},
+  {id:'comprasprov', name:'Compras a Proveedor', ico:I.truck},
   {sec:'Decisiones'},
   {id:'compras', name:'Sugerencias de Compra', ico:I.cart},
   {id:'promociones', name:'Promociones & Liquidación', ico:I.tag},
@@ -146,8 +150,8 @@ VIEWS.resumen = ()=>{
   </div>
 
   <div class="grid g-4" style="margin-top:14px">
-    ${kpi({lbl:'Ventas Netas',val:fCompact(r.ventas_netas),sub:`${fNum(r.facturas)} facturas · ticket ${fMX(r.ticket_promedio)}`,ico:I.sales,cls:'feat',glow:'rgba(226,52,64,.22)'})}
-    ${kpi({lbl:'Margen Bruto',val:fCompact(r.margen_bruto),sub:`<span class="chg up">${fPct(r.margen_pct)}</span> sobre ventas`,ico:I.margin,glow:'rgba(54,214,195,.18)'})}
+    ${kpi({lbl:'Ventas Totales (c/IVA)',val:fCompact(r.ventas_totales_cf),sub:`neto ${fCompact(r.ventas_netas)} + IVA ${fCompact(D.ventas.iva)} · ${fNum(r.facturas)} facturas`,ico:I.sales,cls:'feat',glow:'rgba(226,52,64,.22)'})}
+    ${kpi({lbl:'Margen Bruto',val:fCompact(r.margen_bruto),sub:`<span class="chg up">${fPct(r.margen_pct)}</span> sobre venta neta · ticket ${fMX(r.ticket_promedio)}`,ico:I.margin,glow:'rgba(54,214,195,.18)'})}
     ${kpi({lbl:'Valor Inventario',val:fCompact(r.inventario_valor),sub:`${fNum(inv.dias_inventario)} días · ${fNum(inv.turnover_real_anual,2)}x rotación real`,ico:I.box,glow:'rgba(139,124,246,.16)'})}
     ${kpi({lbl:'Cartera por Cobrar',val:fCompact(r.cartera),sub:`DSO ${fNum(r.dso,1)} días · ${fNum(cob.clientes_con_saldo)} clientes`,ico:I.cash,cls:'',glow:'rgba(61,220,151,.16)'})}
   </div>
@@ -409,6 +413,153 @@ VIEWS.semanal = ()=>{
   };
   return {html, init};
 };
+/* ---------- COMPRAS A PROVEEDOR (Diario de compras del ERP) ---------- */
+VIEWS.comprasprov = ()=>{
+  const c = D.compras;
+  if(!c || !c.recepciones){
+    return {html: sHead('Compras a Proveedor','Recepciones de mercancía del Diario de compras del ERP.') +
+      insight('crit',I.truck,'Reporte de Compras no cargado','Para ver este módulo, carga el reporte <b>"Diarios de compras"</b> del ERP en <b>Actualizar Datos</b>. El tablero consolidará recepciones, importes, artículos comprados y la relación compra/venta del periodo.')};
+  }
+  const sobreCompra = c.compras_vs_cogs_pct!=null && c.compras_vs_cogs_pct>110;
+  const semTxt = c.semana && c.semana.recepciones ? `${fNum(c.semana.recepciones)} recepciones esta semana` : 'sin recepciones en la semana de corte';
+  const html = `
+  ${sHead('Compras a proveedor','Recepciones de mercancía registradas en el Diario de compras del ERP — cuánto capital entró al inventario y en qué artículos.')}
+  <div class="grid g-4">
+    ${kpi({lbl:'Compra Neta del Periodo',val:fCompact(c.neto),sub:`${fNum(c.recepciones)} recepciones · ${fNum(c.partidas)} partidas`,ico:I.truck,cls:'feat',glow:'rgba(226,52,64,.22)'})}
+    ${kpi({lbl:'Compra Total (c/IVA)',val:fCompact(c.total),sub:`IVA acreditable ${fCompact(c.impuesto)}`,ico:I.cash,glow:'rgba(54,214,195,.16)'})}
+    ${kpi({lbl:'Compra Promedio',val:fMX(c.promedio_recepcion),sub:'por recepción de mercancía',ico:I.doc})}
+    ${kpi({lbl:'Compras de la Semana',val:fCompact(c.semana?c.semana.neto:null),sub:semTxt,ico:I.cal,glow:'rgba(139,124,246,.16)'})}
+  </div>
+  <div class="grid g-4" style="margin-top:16px">
+    ${kpi({lbl:'Compra vs. Venta',val:fPct(c.compras_vs_ventas_pct),sub:'compra neta / venta neta del periodo',ico:I.trend,cls:sobreCompra?'alert':''})}
+    ${kpi({lbl:'Compra vs. Costo Vendido',val:fPct(c.compras_vs_cogs_pct),sub:'compra neta / COGS del periodo',ico:I.rotate})}
+    ${kpi({lbl:'Artículos Distintos',val:fNum(c.articulos_distintos),sub:'referencias recibidas',ico:I.box})}
+    ${kpi({lbl:'Proveedores',val:fNum(c.proveedores),sub:(c.por_proveedor[0]?trunc(c.por_proveedor[0].proveedor,26):''),ico:I.users})}
+  </div>
+
+  ${sHead('Ritmo de compra','Compra neta recibida por mes — para contrastar contra el ritmo de venta y la acumulación de inventario.')}
+  <div class="grid g-2">
+    <div class="card pad-lg">
+      <div class="card-h"><span class="t">Compra neta por mes</span><span class="tag amber">Recepciones</span></div>
+      <div id="c_comp_mes" class="chart h-md"></div>
+    </div>
+    <div class="card pad-lg">
+      <div class="card-h"><span class="t">Compra vs. costo de lo vendido</span><span class="tag teal">Balance</span></div>
+      <div id="c_comp_bal" class="chart h-md"></div>
+      <div class="note">Cada peso comprado por encima del costo de lo vendido (${fCompact(D.margen.cogs)}) se convierte en inventario adicional en el almacén.</div>
+    </div>
+  </div>
+
+  ${sHead('Artículos con mayor inversión','Referencias en las que se concentró el gasto de compra del periodo.')}
+  <div class="card">
+    <div class="tbl-wrap"><table class="dt"><thead><tr><th></th><th>Artículo</th><th class="num">Unidades</th><th class="num">Compra</th><th>Peso</th></tr></thead><tbody>
+    ${c.top_articulos.slice(0,15).map((a,i)=>{const mx=c.top_articulos[0].importe||1;return `<tr>
+      <td><span class="t-rank ${i<3?'top':''}">${i+1}</span></td>
+      <td class="t-desc" title="${(a.desc||'').replace(/"/g,'&quot;')}">${trunc(a.desc,64)}</td>
+      <td class="num">${fNum(a.u)}</td>
+      <td class="num">${fMX(a.importe)}</td>
+      <td><div class="minibar teal"><i style="width:${a.importe/mx*100}%"></i></div></td>
+    </tr>`}).join('')}
+    </tbody></table></div>
+  </div>
+
+  ${sHead('Lectura de compras','Síntesis para la dirección.')}
+  <div style="display:flex;flex-direction:column;gap:12px">
+    ${sobreCompra ? insight('crit',I.alert,'Se está comprando por encima del ritmo de venta',
+        'La compra neta del periodo ('+fMX(c.neto)+') equivale al '+fPct(c.compras_vs_cogs_pct)+' del costo de lo vendido ('+fMX(D.margen.cogs)+'). El excedente alimenta directamente el valor de inventario ('+fCompact(D.inventario.valor_total)+') y el capital inmovilizado ('+fCompact(D.inventario.capital_muerto)+'). Alinear la compra a la demanda real es la palanca para liberar flujo.')
+      : insight('good',I.check,'Compra alineada a la venta','La compra neta del periodo ('+fMX(c.neto)+') está en línea con el costo de lo vendido; el inventario no está creciendo por encima de la demanda.')}
+    ${insight('',I.truck,'Concentración de proveedor','El '+fPct(100*((c.por_proveedor[0]?c.por_proveedor[0].neto:0)/(c.neto||1)))+' de la compra se concentra en '+(c.por_proveedor[0]?trunc(c.por_proveedor[0].proveedor,40):'un proveedor')+'. Esta posición es palanca para negociar precio, plazo y devoluciones sobre el capital inmovilizado.')}
+  </div>`;
+  const init = ()=>{
+    mk('c_comp_mes',{
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'},formatter:p=>{const d=c.por_mes[p[0].dataIndex];return `<b>${d.mes}</b><br>Compra: ${fMX(d.neto)}<br>Recepciones: ${fNum(d.recepciones)}`;}},
+      xAxis:{type:'category',data:c.por_mes.map(m=>m.mes),...axisStyle()},
+      yAxis:{type:'value',...axisStyle(),axisLabel:{color:C.txt,fontSize:11,formatter:v=>fCompact(v)}},
+      series:[{type:'bar',barWidth:'56%',itemStyle:{borderRadius:[7,7,0,0],color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:C.amber2},{offset:1,color:C.amber}])},data:c.por_mes.map(m=>m.neto)}]
+    });
+    mk('c_comp_bal',{
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'},valueFormatter:v=>fMX(v)},
+      xAxis:{type:'category',data:['Compra neta','Costo vendido\n(COGS)','Venta neta'],...axisStyle(),axisLabel:{color:C.txt,fontSize:11,lineHeight:14}},
+      yAxis:{type:'value',...axisStyle(),axisLabel:{color:C.txt,fontSize:11,formatter:v=>fCompact(v)}},
+      series:[{type:'bar',barWidth:'46%',itemStyle:{borderRadius:[6,6,0,0]},
+        data:[{value:c.neto,itemStyle:{color:C.amber}},{value:D.margen.cogs,itemStyle:{color:C.violet}},{value:D.ventas.neto,itemStyle:{color:C.teal}}],
+        label:{show:true,position:'top',color:'#e8edf6',fontFamily:'IBM Plex Mono',fontSize:11,formatter:p=>fCompact(p.value)}}]
+    });
+  };
+  return {html, init};
+};
+
+/* ---------- PEDIDOS & SURTIDO (backlog comercial) ---------- */
+VIEWS.pedidos = ()=>{
+  const p = D.pedidos;
+  if(!p || !p.total){
+    return {html: sHead('Pedidos & Surtido','Backlog comercial a partir del reporte de Pedidos del ERP.') +
+      insight('crit',I.clip,'Reporte de Pedidos no cargado','Para ver este módulo, carga el reporte de <b>Pedidos</b> del ERP en <b>Actualizar Datos</b>. El tablero mostrará el backlog pendiente de surtir, la tasa de surtido y los pedidos de la semana.')};
+  }
+  const estColors = {surtido:'#3ddc97', cerrado:'#36d6c3', pendiente:'#f0b34a', cancelado:'#e23440'};
+  const colorFor = e=>{ const s=(e||'').toLowerCase(); for(const k in estColors) if(s.includes(k.slice(0,4))) return estColors[k]; return '#8b7cf6'; };
+  const html = `
+  ${sHead('Pedidos & Surtido','Estado de los pedidos levantados en el ERP: cuánto se ha surtido, cuánto está pendiente de entregar y dónde está el riesgo de venta.')}
+  <div class="grid g-4">
+    ${kpi({lbl:'Pedidos del Periodo',val:fNum(p.activos),sub:`${fNum(p.cancelados)} cancelados excluidos`,ico:I.clip,cls:'feat',glow:'rgba(226,52,64,.22)'})}
+    ${kpi({lbl:'Importe Pedido',val:fCompact(p.importe),sub:`ticket promedio ${fMX(p.ticket_promedio)}`,ico:I.cash,glow:'rgba(54,214,195,.16)'})}
+    ${kpi({lbl:'Backlog Pendiente',val:fCompact(p.pendientes.importe),sub:`${fNum(p.pendientes.n)} pedidos sin surtir`,ico:I.alert,cls:p.pendientes.n?'alert':''})}
+    ${kpi({lbl:'Tasa de Surtido',val:fPct(p.fill_rate_pct),sub:`${fNum(p.surtidos.n)} surtidos/cerrados`,ico:I.check,glow:'rgba(61,220,151,.18)'})}
+  </div>
+  ${p.semana && p.semana.n ? `<div class="grid g-4" style="margin-top:16px">
+    ${kpi({lbl:'Pedidos de la Semana',val:fNum(p.semana.n),sub:'semana de corte (sáb–vie)',ico:I.cal})}
+    ${kpi({lbl:'Importe de la Semana',val:fCompact(p.semana.importe),sub:'pedidos levantados en la semana',ico:I.trend})}
+    ${kpi({lbl:'Clientes con Pedido',val:fNum(p.top_clientes.length),sub:'en el periodo',ico:I.users})}
+    ${kpi({lbl:'Pedido Promedio Semanal',val:fMX(p.semana.importe/Math.max(1,p.semana.n)),sub:'importe / pedidos de la semana',ico:I.doc})}
+  </div>`:''}
+
+  ${sHead('Composición del surtido','Distribución de pedidos por estatus y clientes que más piden.')}
+  <div class="grid g-2">
+    <div class="card pad-lg">
+      <div class="card-h"><span class="t">Pedidos por estatus</span><span class="tag teal">${fNum(p.total)} totales</span></div>
+      <div id="c_ped_est" class="chart h-md"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span class="t">Clientes con más pedido</span><span class="tag amber">Top</span></div>
+      ${p.top_clientes.slice(0,8).map((cl,i)=>`<div class="prow"><span class="nm">${trunc(cl.cliente,26)}</span><div class="track"><i style="width:${Math.max(3,cl.importe/(p.top_clientes[0].importe||1)*100)}%;background:${SERIES[i%SERIES.length]}"></i></div><span class="vv">${fCompact(cl.importe)}</span></div>`).join('')}
+      <div class="note" style="margin-top:12px">Importe pedido acumulado del periodo (excluye cancelados).</div>
+    </div>
+  </div>
+
+  ${p.pendientes_top.length ? `
+  ${sHead('Backlog pendiente de surtir','Pedidos abiertos ordenados por importe — venta comprometida que aún no se entrega ni factura.')}
+  <div class="card">
+    <div class="tbl-wrap"><table class="dt"><thead><tr><th></th><th>Folio</th><th>Fecha</th><th>Cliente</th><th class="num">Importe</th></tr></thead><tbody>
+    ${p.pendientes_top.slice(0,15).map((o,i)=>`<tr>
+      <td><span class="t-rank ${i<3?'top':''}">${i+1}</span></td>
+      <td class="t-code">${o.folio}</td>
+      <td>${o.fecha||'—'}</td>
+      <td class="t-desc">${trunc(o.cliente||'—',44)}</td>
+      <td class="num">${fMX(o.importe)}</td>
+    </tr>`).join('')}
+    </tbody></table></div>
+  </div>`:''}
+
+  ${sHead('Lectura de pedidos','Síntesis para la dirección.')}
+  <div style="display:flex;flex-direction:column;gap:12px">
+    ${p.pendientes.n ? insight(p.pendientes.importe>100000?'crit':'',I.alert,'Venta comprometida sin surtir: '+fMX(p.pendientes.importe),
+        'Hay '+fNum(p.pendientes.n)+' pedidos pendientes de entrega. Cada día sin surtir es venta en riesgo de cancelación y capital de inventario que no rota. Prioriza el surtido de los folios de mayor importe.')
+      : insight('good',I.check,'Sin backlog pendiente','Todos los pedidos del periodo están surtidos o cerrados.')}
+    ${insight('good',I.check,'Tasa de surtido del '+fPct(p.fill_rate_pct),'De '+fNum(p.activos)+' pedidos activos, '+fNum(p.surtidos.n)+' ya fueron surtidos o cerrados. '+(p.fill_rate_pct>=97?'La operación de almacén responde al ritmo comercial.':'Hay espacio para acelerar el ciclo pedido → entrega.'))}
+  </div>`;
+  const init = ()=>{
+    mk('c_ped_est',{
+      tooltip:{trigger:'item',formatter:pt=>`<b>${pt.name}</b><br>${fNum(pt.value)} pedidos (${pt.percent}%)`},
+      legend:{bottom:0,textStyle:{color:C.txt},icon:'roundRect',itemWidth:12,itemHeight:12},
+      series:[{type:'pie',radius:['52%','78%'],center:['50%','44%'],
+        itemStyle:{borderColor:'#121826',borderWidth:3,borderRadius:6},
+        label:{show:false},
+        data:p.por_estatus.map(e=>({name:e.estatus, value:e.n, itemStyle:{color:colorFor(e.estatus)}}))}]
+    });
+  };
+  return {html, init};
+};
+
 VIEWS.ventas = ()=>{
   const v=D.ventas, abc=D.abc;
   const html=`

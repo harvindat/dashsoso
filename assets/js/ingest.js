@@ -111,7 +111,11 @@
     fecha:   ['fecha','fecha factura','fecha documento','fecha de cobro','fecha cobro','fecha de pago','fecha pago','fecha movimiento','fecha de movimiento'],
     cobro:   ['importe cobrado','monto cobrado','cobrado','importe del cobro','importe de cobro','abono','pago','importe pagado','monto','cobro','recuperado','importe recuperado','depositado'],
     recibo:  ['recibo','no. recibo','num recibo','folio cobro','folio de cobro','referencia','no. cobro','num cobro','poliza','folio recibo'],
-    forma:   ['forma de cobro','forma de pago','metodo de pago','metodo de cobro','tipo de cobro','via']
+    forma:   ['forma de cobro','forma de pago','metodo de pago','metodo de cobro','tipo de cobro','via'],
+    proveedor:['proveedor','nombre del proveedor','nombre proveedor','razon social del proveedor'],
+    estatus: ['estatus','estado','status'],
+    entrega: ['entrega','fecha de entrega','fecha entrega'],
+    cancelado:['cancelado','cancelada','cancelados']
   };
 
   const REPORT_TYPES = {
@@ -122,14 +126,14 @@
     INACTIVOS: { nombre:'Artículos inactivos',          req:['code','lastSale'],              opt:['desc','stock','value'] },
     ROTACION:  { nombre:'Rotación de inventario',       req:['desc','outflow','avgInv'],      opt:['turnover','code'] },
     COBRANZA:  { nombre:'Cobranza / Cartera',           req:['client','balance'],             opt:['days','invoices'] },
-    COBROS:    { nombre:'Cobros realizados (recuperación)', req:['cobro'],                     opt:['fecha','client','recibo','forma','folio'] },
-    DRVETS:    { nombre:'Diario de ventas (facturas)',  req:['folio','amount'],               opt:['client','tax','total','fecha'] }
+    COBROS:    { nombre:'Cobros realizados (recuperación)', req:['cobro'],                     opt:['fecha','client','recibo','forma','folio','cancelado'] },
+    DRVETS:    { nombre:'Diario de ventas (facturas)',  req:['folio','amount'],               opt:['client','tax','total','fecha'] },
+    COMPRAS:   { nombre:'Diario de compras (recepciones)', req:[],                            opt:['fecha','folio','proveedor','amount','tax'] },
+    PEDIDOS:   { nombre:'Pedidos (surtido y backlog)',  req:['folio','estatus'],              opt:['fecha','client','amount','total','entrega'] }
   };
 
   /* Reportes del ERP que NO alimentan el tablero (se reconocen para avisar) */
-  const IGNORED_TITLES = [
-    {re:/diarios? de compras/, nombre:'Diario de compras'}
-  ];
+  const IGNORED_TITLES = [];
 
   /* ================= lectura de archivos ================= */
   async function parseFile(file){
@@ -170,17 +174,27 @@
     return (aoa[headerIdx]||[]).map((c,i)=>({i, raw:c, key:strip(c)}));
   }
 
+  /* Coincidencia por PALABRA COMPLETA: evita falsos positivos por subcadena
+     (p.ej. el sinónimo "cobrado" NO debe mapear la columna "Cobrador", ni
+     "cu" la columna "Documento enviado"). */
+  function wordMatch(hay, needle){
+    if(hay===needle) return true;
+    if(!hay || !needle || needle.length<3 || hay.length<3) return false;
+    const esc = needle.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    return new RegExp('(^|[^a-z0-9])'+esc+'($|[^a-z0-9])').test(hay);
+  }
+
   /* Mapea automáticamente columnas → campos por sinónimos (mejor coincidencia) */
   function autoMapColumns(headers){
     const map = {};
     const used = new Set();
-    // primero coincidencias exactas, luego parciales
+    // primero coincidencias exactas, luego parciales (por palabra completa)
     for(const pass of ['exact','partial']){
       for(const [field, syns] of Object.entries(FIELD_SYNONYMS)){
         if(map[field]!=null) continue;
         for(const h of headers){
           if(!h.key || used.has(h.i)) continue;
-          const hit = syns.some(sy => pass==='exact' ? h.key===sy : (h.key.includes(sy)||sy.includes(h.key)) && h.key.length>=3);
+          const hit = syns.some(sy => pass==='exact' ? h.key===sy : (wordMatch(h.key, sy) || wordMatch(sy, h.key)));
           if(hit){ map[field]=h.i; used.add(h.i); break; }
         }
       }
@@ -276,6 +290,36 @@
                         .sort((a,b)=>b.nums-a.nums)[0];
       if(cand){ map.units=cand.c; used.add(cand.c); }
     }
+    // COBROS: el importe cobrado DEBE ser numérico. Si la columna mapeada trae
+    // texto (p.ej. "Cobrador"), se remapea a la mejor columna numérica libre.
+    if(type==='COBROS' && map.cobro!=null){
+      const st = stats.find(s=>s.c===map.cobro);
+      if(st && st.filled>0 && st.nums < st.filled*0.5){
+        used.delete(map.cobro); map.cobro=null;
+        const cand = stats.filter(s=>free(s) && s.nums>=sample.length*0.5)
+                          .sort((a,b)=>(b.maxAbs-a.maxAbs)||(b.c-a.c))[0];
+        if(cand){ map.cobro=cand.c; used.add(cand.c); }
+      }
+    }
+    // ROTACION: si "desc" quedó apuntando a la columna de CLAVES, la descripción
+    // real vive en la columna de texto largo sin encabezado (celdas combinadas)
+    if(type==='ROTACION' && map.desc!=null){
+      let shortCodes=0, checked=0;
+      sample.forEach(r=>{
+        const v=r[map.desc];
+        if(v==null||v==='') return;
+        checked++;
+        if(String(v).trim().length<=10) shortCodes++;
+      });
+      if(checked && shortCodes/checked>0.7){
+        const cand = stats.filter(s=>free(s) && s.txtLong>=sample.length*0.5)
+                          .sort((a,b)=>b.txtLong-a.txtLong)[0];
+        if(cand){
+          if(map.code==null) map.code = map.desc;
+          map.desc = cand.c; used.add(cand.c);
+        }
+      }
+    }
     return map;
   }
 
@@ -308,6 +352,9 @@
     let txt='';
     for(let i=0;i<lim;i++) txt += ' ' + (aoa[i]||[]).filter(c=>typeof c==='string').map(strip).join(' ');
     for(const ig of IGNORED_TITLES) if(ig.re.test(txt)) return {ignored:ig.nombre};
+    // Diario de COMPRAS (recepciones de mercancía): formato agrupado con
+    // sub-bloques de artículos por recepción. Va ANTES que cobros/ventas.
+    if(/diarios? de compras|recepciones de mercancia/.test(txt)) return {type:'COMPRAS', grouped:true};
     // Reporte de COBROS realizados (recuperación): el título o los encabezados
     // "Forma de cobro"/"Cobrador" lo delatan. Va ANTES que cobranza/cartera.
     if(/cobros realizados|^cobros\b|recuperacion de cartera|relacion de cobros|forma de cobro|cobrador/.test(txt)) return {type:'COBROS'};
@@ -338,12 +385,16 @@
     if(has('client') && (has('code')||has('desc')) && has('amount')) bump('CLI_ART',3);
     if(has('client') && has('amount') && !has('code') && !has('desc')) bump('VENTAS_CLI',4);
     if(has('code') && has('units') && has('amount') && !has('client') && !has('stock')) bump('VENTAS_ART',4);
+    if(has('estatus') && has('folio')) bump('PEDIDOS',6);               // estatus+folio = pedidos
+    if(has('proveedor') && has('folio')) bump('COMPRAS',6);             // proveedor+folio = compras
 
     if(/exival|exist/.test(fn)) bump('EXIVAL',3);
     if(/inact/.test(fn)) bump('INACTIVOS',3);
     if(/rot/.test(fn)) bump('ROTACION',3);
     if(/cobr|cartera|cxc/.test(fn)) bump('COBRANZA',3);
     if(/cobros|recupera|pagos/.test(fn)) bump('COBROS',4);
+    if(/pedido/.test(fn)) bump('PEDIDOS',4);
+    if(/compra/.test(fn)) bump('COMPRAS',3);
     if(/vtsart|art/.test(fn)) bump('VENTAS_ART',2);
     if(/cliente.*art|art.*cliente|cliart|cruce/.test(fn)) bump('CLI_ART',3);
     if(/vtscli|cliente/.test(fn)) bump('VENTAS_CLI',2);
@@ -374,6 +425,10 @@
     }
     if(type==='DRVETS'){
       // "Importe neto" debe ser amount; "Total" NO debe robarle la columna a amount
+      if(map.amount==null && map.total!=null){ map.amount=map.total; map.total=null; }
+    }
+    if(type==='PEDIDOS'){
+      // "Importe total" del pedido suele mapear a total: usarlo como importe
       if(map.amount==null && map.total!=null){ map.amount=map.total; map.total=null; }
     }
     if(type==='INACTIVOS'){
@@ -501,8 +556,76 @@
     return out;
   }
 
+  /* ---------- parser: Diario de COMPRAS (recepciones agrupadas) ----------
+     Estructura real del ERP:
+       fila maestro : Fecha | Folio (RC…) | Proveedor | Importe neto | Impuesto
+       sub-header   : "Artículo" … "Unidades" … "Precio"
+       filas detalle: descripción | unidades | u.med. | precio unitario
+     Cada recepción se emite con su lista de partidas (importe = u × precio). */
+  function parseGroupedCompras(aoa, warnings){
+    const out = [];
+    let mh = null;
+    for(let i=0;i<Math.min(aoa.length,25);i++){
+      const keys = (aoa[i]||[]).map(strip);
+      const fi=keys.indexOf('fecha'), fo=keys.indexOf('folio');
+      const pr=keys.findIndex(k=>k.includes('proveedor'));
+      const ne=keys.findIndex(k=>k==='importe neto'||k==='importe'||k==='neto');
+      const im=keys.findIndex(k=>k==='impuesto'||k==='iva'||k==='impuestos');
+      if(fi>-1 && fo>-1 && ne>-1){ mh={fecha:fi,folio:fo,prov:pr,neto:ne,imp:im,idx:i}; break; }
+    }
+    if(!mh){
+      if(warnings) warnings.push('Diario de compras: no se encontró el encabezado Fecha/Folio/Proveedor/Importe neto.');
+      return out;
+    }
+    let cur=null, det=null, erpTotal=null;
+    for(let i=mh.idx+1;i<aoa.length;i++){
+      const row = aoa[i]||[];
+      if(!row.some(c=>c!=null && c!=='')) continue;
+      const c0 = row[0];
+      if(typeof c0==='string' && /^total\b/i.test(c0.trim())){
+        const t = num(row[mh.neto]); if(t) erpTotal = t;
+        continue;
+      }
+      const keys = row.map(strip);
+      const ai = keys.indexOf('articulo');
+      if(ai>-1 && (keys.includes('unidades')||keys.includes('precio'))){
+        det = {desc:ai, units:keys.indexOf('unidades'), precio:keys.indexOf('precio')};
+        continue;
+      }
+      const folioV = row[mh.folio];
+      const folioS = folioV!=null ? String(folioV).trim() : '';
+      if(folioS && strip(folioS)!=='folio' && row[mh.neto]!=null && row[mh.neto]!==''){
+        const fecha = toISODate(row[mh.fecha]);
+        const neto = round2(num(row[mh.neto]));
+        const impuesto = mh.imp>-1 ? round2(num(row[mh.imp])) : round2(neto*0.16);
+        cur = {folio:folioS, fecha,
+               proveedor: mh.prov>-1 ? String(row[mh.prov]??'').trim() : '',
+               neto, impuesto, total: round2(neto+impuesto), partidas:[]};
+        out.push(cur);
+        continue;
+      }
+      if(cur && det && det.desc>-1){
+        const d = row[det.desc];
+        if(typeof d==='string' && d.trim() && strip(d)!=='articulo'){
+          const u = det.units>-1 ? num(row[det.units]) : 0;
+          const p = det.precio>-1 ? num(row[det.precio]) : 0;
+          cur.partidas.push({desc:d.trim(), u, precio:round2(p), importe:round2(u*p)});
+        }
+      }
+    }
+    if(erpTotal!=null && out.length){
+      const sum = out.reduce((s,r)=>s+r.neto,0);
+      const diff = Math.abs(sum-erpTotal)/Math.max(erpTotal,1);
+      if(diff>0.005 && warnings)
+        warnings.push(`Diario de compras: la suma de recepciones (${sum.toLocaleString('es-MX',{style:'currency',currency:'MXN'})}) difiere ${(diff*100).toFixed(1)}% del total impreso por el ERP (${erpTotal.toLocaleString('es-MX',{style:'currency',currency:'MXN'})}). Puede haber documentos cancelados en el reporte.`);
+    }
+    if(!out.length && warnings) warnings.push('El Diario de compras no produjo recepciones.');
+    return out;
+  }
+
   /* Convierte la hoja a registros normalizados según tipo + mapeo */
   function normalizeRows(aoa, headerIdx, type, map, warnings, grouped){
+    if(type==='COMPRAS')             return parseGroupedCompras(aoa, warnings);
     if(grouped && type==='CLI_ART')  return parseGroupedCliArt(aoa, warnings);
     if(grouped && type==='COBRANZA') return parseGroupedCobranza(aoa, warnings);
     const out = [];
@@ -560,12 +683,29 @@
       }else if(type==='COBROS'){
         const importe = round2(num(get(row,'cobro')));
         if(!importe) continue;                                   // ignora filas sin importe
+        // cobros CANCELADOS en el ERP: no cuentan como recuperación
+        if(map.cancelado!=null){
+          const cv = strip(get(row,'cancelado'));
+          if(cv==='s'||cv==='si'||cv==='1'||cv==='true'||cv==='x'){ out._cancelados=(out._cancelados||0)+1; continue; }
+        }
         const fecha  = map.fecha!=null  ? toISODate(get(row,'fecha')) : null;
         const cliente= String(get(row,'client')??'').trim();
-        const recibo = map.recibo!=null ? String(get(row,'recibo')??'').trim()
-                     : (map.folio!=null ? String(get(row,'folio')??'').trim() : '');
+        // el FOLIO del cobro es su identificador natural (idempotencia);
+        // la Referencia bancaria puede venir vacía (efectivo) o repetirse
+        const folioC = map.folio!=null  ? String(get(row,'folio')??'').trim() : '';
+        const refC   = map.recibo!=null ? String(get(row,'recibo')??'').trim() : '';
+        const recibo = folioC || refC;
         const forma  = map.forma!=null  ? String(get(row,'forma')??'').trim() : '';
         out.push({recibo, fecha, cliente, importe, forma});
+      }else if(type==='PEDIDOS'){
+        const folio = String(get(row,'folio')??'').trim();
+        if(!folio) continue;
+        const importe = round2(num(get(row,'amount')!=null && map.amount!=null ? get(row,'amount') : get(row,'total')));
+        const estatus = String(get(row,'estatus')??'').trim() || 'Sin estatus';
+        const fecha   = map.fecha!=null   ? toISODate(get(row,'fecha'))   : null;
+        const entrega = map.entrega!=null ? toISODate(get(row,'entrega')) : null;
+        const cliente = String(get(row,'client')??'').trim();
+        out.push({folio, fecha, cliente, estatus, entrega, importe});
       }else if(type==='DRVETS'){
         const folio = String(get(row,'folio')??'').trim();
         if(!folio) continue;
@@ -580,6 +720,7 @@
                   fecha});
       }
     }
+    if(out._cancelados && warnings) warnings.push(`${out._cancelados} cobros marcados como CANCELADOS en el ERP se excluyeron de la recuperación.`);
     if(!out.length && warnings) warnings.push(`El reporte "${T.nombre}" no produjo filas válidas — revisa el mapeo de columnas.`);
     return out;
   }
@@ -589,7 +730,8 @@
     return {
       version:2,
       meta:{empresa:'HARVIN DISTRIBUCIONES', inicio:null, corte:null, dias:0, facturas:null, iva:null, actualizado:null},
-      ventasArt:{}, ventasCli:{}, cliArt:[], exival:{}, inactivosUV:{}, rotacion:[], cobranza:[], cobros:{}, drvets:{}
+      ventasArt:{}, ventasCli:{}, cliArt:[], exival:{}, inactivosUV:{}, rotacion:[], cobranza:[], cobros:{}, drvets:{},
+      compras:{}, pedidos:{}
     };
   }
 
@@ -665,6 +807,14 @@
         store.drvets[r.folio] = {cliente:r.cliente, neto:r.neto, iva:r.iva, total:r.total,
                                  fecha: r.fecha || (prev && prev.fecha) || null};
       });
+    }else if(type==='COMPRAS'){
+      // por FOLIO de recepción (RC…): re-subir el diario NO duplica compras
+      if(!acum || !store.compras) store.compras = {};
+      records.forEach(r=>{ store.compras[r.folio] = r; });
+    }else if(type==='PEDIDOS'){
+      // por FOLIO de pedido: el estatus más reciente sustituye al anterior
+      if(!acum || !store.pedidos) store.pedidos = {};
+      records.forEach(r=>{ store.pedidos[r.folio] = r; });
     }
   }
 
@@ -995,6 +1145,7 @@
        - modo 'estimado': sin fechas, se prorratea el ritmo del periodo
          (claramente etiquetado) hasta que se cargue el diario con fecha. */
     let semanal = null;
+    let _wIni=null, _wFinEf=null, _wIniPrev=null, _wFinPrev=null;  // ventana de corte (compras/pedidos)
     if(meta.corte){
       const DIA = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
       const dowCorte = isoToDate(meta.corte).getDay();           // 0=Dom..6=Sáb
@@ -1005,9 +1156,11 @@
       }
       const fin = isoAdd(ini, 6);                                // viernes
       const finEf = fin <= meta.corte ? fin : meta.corte;        // fin efectivo (no pasar el corte)
+      _wIni = ini; _wFinEf = finEf;
       const completa = fin <= meta.corte;
       const diasTrans = Math.round((isoToDate(finEf)-isoToDate(ini))/86400000)+1;
       const iniPrev = isoAdd(ini,-7), finPrev = isoAdd(ini,-1);
+      _wIniPrev = iniPrev; _wFinPrev = finPrev;
 
       const conFecha = drvetsArr.filter(r=>r.fecha);
       const margenPct = margen.margen_pct || 0;
@@ -1117,6 +1270,98 @@
       semanal = B.semanal || null;
     }
 
+    /* ---------- COMPRAS A PROVEEDOR (Diario de compras) ---------- */
+    let compras;
+    const comprasArr = Object.values(store.compras||{});
+    if(comprasArr.length){
+      const cNeto = round2(comprasArr.reduce((s,r)=>s+(r.neto||0),0));
+      const cImp  = round2(comprasArr.reduce((s,r)=>s+(r.impuesto||0),0));
+      const porProvMap = {}, porMesMap = {}, artMap = {};
+      let partidas = 0;
+      comprasArr.forEach(r=>{
+        const pk = (r.proveedor||'(Sin proveedor)').toUpperCase();
+        if(!porProvMap[pk]) porProvMap[pk] = {proveedor:r.proveedor||'(Sin proveedor)', neto:0, recepciones:0};
+        porProvMap[pk].neto = round2(porProvMap[pk].neto + (r.neto||0));
+        porProvMap[pk].recepciones++;
+        if(r.fecha){
+          const mes = r.fecha.slice(0,7);
+          if(!porMesMap[mes]) porMesMap[mes] = {mes, neto:0, recepciones:0};
+          porMesMap[mes].neto = round2(porMesMap[mes].neto + (r.neto||0));
+          porMesMap[mes].recepciones++;
+        }
+        (r.partidas||[]).forEach(p=>{
+          partidas++;
+          const ak = strip(p.desc);
+          if(!artMap[ak]) artMap[ak] = {desc:p.desc, u:0, importe:0};
+          artMap[ak].u += p.u||0;
+          artMap[ak].importe = round2(artMap[ak].importe + (p.importe||0));
+        });
+      });
+      const conFechaC = comprasArr.filter(r=>r.fecha);
+      const semC = (_wIni && _wFinEf) ? conFechaC.filter(r=>r.fecha>=_wIni && r.fecha<=_wFinEf) : [];
+      const semCPrev = (_wIniPrev && _wFinPrev) ? conFechaC.filter(r=>r.fecha>=_wIniPrev && r.fecha<=_wFinPrev) : [];
+      compras = {
+        neto: cNeto, impuesto: cImp, total: round2(cNeto+cImp),
+        recepciones: comprasArr.length, partidas,
+        proveedores: Object.keys(porProvMap).length,
+        por_proveedor: Object.values(porProvMap).sort((a,b)=>b.neto-a.neto),
+        por_mes: Object.values(porMesMap).sort((a,b)=>a.mes<b.mes?-1:1),
+        top_articulos: Object.values(artMap).sort((a,b)=>b.importe-a.importe).slice(0,40),
+        articulos_distintos: Object.keys(artMap).length,
+        promedio_recepcion: round2(safeDiv(cNeto, comprasArr.length)),
+        compras_vs_ventas_pct: round2(safeDiv(cNeto, ventas.neto)*100),
+        compras_vs_cogs_pct: (margen.cogs>0) ? round2(safeDiv(cNeto, margen.cogs)*100) : null,
+        semana: { inicio:_wIni, fin_efectivo:_wFinEf,
+                  neto: round2(semC.reduce((s,r)=>s+(r.neto||0),0)), recepciones: semC.length,
+                  anterior: round2(semCPrev.reduce((s,r)=>s+(r.neto||0),0)), recepciones_anterior: semCPrev.length }
+      };
+    }else{
+      compras = B.compras || null;
+    }
+
+    /* ---------- PEDIDOS (surtido y backlog) ---------- */
+    let pedidos;
+    const pedArr = Object.values(store.pedidos||{});
+    if(pedArr.length){
+      const cls = e=>{ const s=strip(e); if(s.includes('cancel')) return 'cancelado';
+                       if(s.includes('pend')) return 'pendiente';
+                       if(s.includes('surt')) return 'surtido';
+                       if(s.includes('cerr')) return 'cerrado'; return 'otro'; };
+      const porEstMap = {};
+      pedArr.forEach(p=>{
+        const k = p.estatus || 'Sin estatus';
+        if(!porEstMap[k]) porEstMap[k] = {estatus:k, n:0, importe:0};
+        porEstMap[k].n++; porEstMap[k].importe = round2(porEstMap[k].importe + (p.importe||0));
+      });
+      const activos = pedArr.filter(p=>cls(p.estatus)!=='cancelado');
+      const pend = pedArr.filter(p=>cls(p.estatus)==='pendiente');
+      const surt = pedArr.filter(p=>{ const c=cls(p.estatus); return c==='surtido'||c==='cerrado'; });
+      const impAct = round2(activos.reduce((s,p)=>s+(p.importe||0),0));
+      const cliMap = {};
+      activos.forEach(p=>{
+        const k=(p.cliente||'(Sin cliente)').toUpperCase();
+        if(!cliMap[k]) cliMap[k]={cliente:p.cliente||'(Sin cliente)', pedidos:0, importe:0};
+        cliMap[k].pedidos++; cliMap[k].importe=round2(cliMap[k].importe+(p.importe||0));
+      });
+      const semP = (_wIni && _wFinEf) ? activos.filter(p=>p.fecha && p.fecha>=_wIni && p.fecha<=_wFinEf) : [];
+      pedidos = {
+        total: pedArr.length, activos: activos.length, importe: impAct,
+        por_estatus: Object.values(porEstMap).sort((a,b)=>b.n-a.n),
+        pendientes: { n: pend.length, importe: round2(pend.reduce((s,p)=>s+(p.importe||0),0)) },
+        surtidos:   { n: surt.length, importe: round2(surt.reduce((s,p)=>s+(p.importe||0),0)) },
+        cancelados: pedArr.length - activos.length,
+        fill_rate_pct: round2(safeDiv(surt.length, activos.length)*100),
+        ticket_promedio: round2(safeDiv(impAct, activos.length)),
+        top_clientes: Object.values(cliMap).sort((a,b)=>b.importe-a.importe).slice(0,15),
+        pendientes_top: pend.sort((a,b)=>(b.importe||0)-(a.importe||0)).slice(0,30)
+                            .map(p=>({folio:p.folio, fecha:p.fecha, cliente:p.cliente, importe:p.importe, entrega:p.entrega})),
+        semana: { inicio:_wIni, fin_efectivo:_wFinEf,
+                  n: semP.length, importe: round2(semP.reduce((s,p)=>s+(p.importe||0),0)) }
+      };
+    }else{
+      pedidos = B.pedidos || null;
+    }
+
     /* ---------- RESUMEN + META ---------- */
     const resumen = {
       empresa: meta.empresa || 'HARVIN DISTRIBUCIONES',
@@ -1128,11 +1373,15 @@
       rotacion: rotacion.rotacion_global,
       cartera: cobranza.cartera_total, dso: cobranza.dso_dias,
       clientes_activos: clientes.total, skus_vendidos: ventas.skus_vendidos,
-      capital_muerto: inventario.capital_muerto, unidades_vendidas: ventas.unidades_vendidas
+      capital_muerto: inventario.capital_muerto, unidades_vendidas: ventas.unidades_vendidas,
+      compras_periodo: compras ? compras.neto : null,
+      pedidos_pendientes: pedidos ? pedidos.pendientes.n : null,
+      pedidos_backlog: pedidos ? pedidos.pendientes.importe : null
     };
 
     const data = { ventas, inventario, margen, articulos, clientes, rotacion, inactivos,
                    cobranza, cliente_articulo, sugerencias_compra: sugerencias, promociones,
+                   compras, pedidos,
                    resumen, abc, semanal,
                    meta: { actualizado: new Date().toISOString(),
                            periodo: resumen.periodo,
